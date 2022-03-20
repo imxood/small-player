@@ -1,0 +1,27 @@
+[package]
+name = "small-player"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+bevy = { version = "0.6", default-features = false }
+bevy_egui = { path = "../bevy_egui", default-features = false }
+crossbeam-channel = "0.5.2"
+cstr = "0.2.10"
+egui_extras = { version = "0.17.0", features = ["svg", "image"] }
+image = "0.24.1"
+log = "0.4.14"
+parking_lot = "0.12.0"
+rfd = "0.8.1"
+rsmpeg = { path = "../rsmpeg" }
+spin_sleep = "1.1.0"
+thiserror = "1.0.30"
+winit = "0.26.1"
+
+# [profile.release]
+# opt-level = 'z'
+# lto = true
+# codegen-units = 1
+# panic = 'abort'
