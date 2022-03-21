@@ -2,9 +2,40 @@
 
 学习与实践是目的.
 
-如果喜欢这个项目, 请 star 或 fork 这个项目.
+如果喜欢这个项目, 请 star 或 fork.
 
 ![](docs/Readme/2022-03-15-00-18-09.png)
+
+## 编译环境
+
+### 安装FFMPEG
+
+#### windows 10
+
+需要安装 vcpkg:
+
+    打开 powershell, 执行:
+
+    git clone https://github.com/Microsoft/vcpkg.git
+    cd vcpkg
+    .\bootstrap-vcpkg.bat -disableMetrics
+    .\vcpkg.exe integrate install
+
+使用 vcpkg 编译 (我开了代理, 总共编译大概36分钟):
+
+    .\vcpkg.exe install ffmpeg[ffmpeg,ffplay,ffprobe,x265,avcodec,avdevice,fdk-aac] --triplet x64-windows-static-md --recurse
+
+#### ubuntu
+
+?? 忘了环境是怎么配的, 这么装应该就可以了
+
+sudo apt install ffmpeg
+
+### 编译并运行
+
+    如果是 debug 版本, 在执行 解码后的Rgb数据 转 egui的 Color Image时 会特别慢, release版本会有优化
+
+    cargo run --release
 
 ## 学习记录
 

@@ -24,6 +24,10 @@ pub fn demux_thread(
                 demux_ctx.ctrl.set_pause(true);
                 state_tx.send(PlayState::Pausing).ok();
             }
+            Ok(Command::Volume(volume)) => {
+                log::info!("recv volume command: {volume}");
+                demux_ctx.ctrl.set_volume(volume);
+            }
             Err(TryRecvError::Disconnected) => {
                 demux_ctx.ctrl.set_abort_request(true);
                 log::info!("demux_thread disconnected");
@@ -53,14 +57,14 @@ pub fn demux_thread(
 
         match demux_ctx.read_packet() {
             Ok(Some(pkt)) => {
-                // 如果是 视频数据包
+                // 视频数据包
                 if pkt.stream_index == video_stream_idx {
                     demux_ctx.queue_push(pkt, StreamType::Video);
                 }
-                // 如果是 音频数据包
-                // else if pkt.stream_index == audio_stream_idx {
-                //     demux_ctx.queue_push(pkt, StreamType::Audio);
-                // }
+                // 音频数据包
+                else if pkt.stream_index == audio_stream_idx {
+                    demux_ctx.queue_push(pkt, StreamType::Audio);
+                }
             }
             Ok(None) => {
                 demux_ctx.ctrl.set_demux_finished(true);

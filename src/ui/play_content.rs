@@ -1,9 +1,9 @@
 use bevy_egui::egui::{
-    vec2, widgets::Image, Color32, ColorImage, Context, InnerResponse, Sense, TextureHandle, Ui,
+    vec2, ColorImage, Context, InnerResponse, Sense, Ui,
 };
-use egui_extras::RetainedImage;
 
-use crate::{defines::icons::ICON_IMAGE, services::player::PlayState};
+
+use crate::{services::player::PlayState};
 
 use super::ui_state::UiState;
 

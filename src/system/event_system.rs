@@ -7,19 +7,21 @@ use bevy::{
 };
 
 use crate::{
-    resources::event::PlayerEvent, services::play_service::PlayService, ui::ui_state::UiState,
+    resources::event::{PlayEvent, PlayerEvent},
+    ui::ui_state::UiState,
 };
 
 use super::GameState;
 
 pub fn update_player_event(
-    mut ui_state: ResMut<UiState>,
-    mut events: EventReader<PlayerEvent>,
-    mut exit: EventWriter<AppExit>,
-    mut windows: ResMut<Windows>,
     winit_windows: Res<WinitWindows>,
-    mut state: ResMut<State<GameState>>,
     diagnostics: Res<Diagnostics>,
+    mut ui_state: ResMut<UiState>,
+    mut windows: ResMut<Windows>,
+    mut state: ResMut<State<GameState>>,
+    mut player_evt: EventReader<PlayerEvent>,
+    mut exit: EventWriter<AppExit>,
+    _play_evt: EventWriter<PlayEvent>,
 ) {
     if let Some(fps_diagnostic) = diagnostics.get(FrameTimeDiagnosticsPlugin::FPS) {
         if let Some(fps_avg) = fps_diagnostic.average() {
@@ -27,7 +29,7 @@ pub fn update_player_event(
         }
     }
 
-    for event in events.iter() {
+    for event in player_evt.iter() {
         match event {
             /*
                 窗口控制
@@ -78,15 +80,16 @@ pub fn update_player_event(
                     }
                 }
             }
-
             PlayerEvent::Start(filename) => {
                 log::info!("开始播放 {}", filename);
-                state.set(GameState::Playing).unwrap();
+                if state.set(GameState::Playing).is_err() {
+                    state.set(GameState::Restart).unwrap();
+                }
                 // let play_service = world.iet_resource::<PlayService>();
             }
             PlayerEvent::Stop => {
                 log::info!("停止播放");
-                state.set(GameState::Stop).unwrap();
+                state.set(GameState::Stop).ok();
             }
             _ => {}
         }

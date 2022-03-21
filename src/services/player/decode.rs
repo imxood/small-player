@@ -1,12 +1,7 @@
-use std::{
-    ffi::CString,
-    sync::{
-        Arc,
-    },
-};
+use std::{ffi::CString, sync::Arc};
 
 use crossbeam_channel::{Receiver, Sender};
-use parking_lot::{Mutex};
+use parking_lot::Mutex;
 use rsmpeg::{
     avcodec::{AVCodecContext, AVPacket},
     avformat::AVFormatContextInput,
@@ -16,12 +11,15 @@ use rsmpeg::{
 use crate::error::{PlayerError, Result};
 
 use super::{
-    demux::demux_thread,
-    stream::{audio_decode_thread, video_decode_thread, DecodeContext},
-    Command, PacketQueue, PlayControl, PlayState, StreamType,
+    audio::audio_decode_thread, demux::demux_thread, stream::DecodeContext,
+    video::video_decode_thread, Command, PacketQueue, PlayControl, PlayState, StreamType,
 };
 
-pub fn decode(filename: String, cmd_rx: Receiver<Command>, state_tx: Sender<PlayState>) -> Result<()> {
+pub fn decode(
+    filename: String,
+    cmd_rx: Receiver<Command>,
+    state_tx: Sender<PlayState>,
+) -> Result<()> {
     let (ifmt_ctx, vdec, adec) = demux_init(filename)?;
 
     let mut demux_ctx = DemuxContext::new(ifmt_ctx);
@@ -32,8 +30,17 @@ pub fn decode(filename: String, cmd_rx: Receiver<Command>, state_tx: Sender<Play
     // 视频解码线程
     if let Some(decode_ctx) = video_decode_ctx {
         let state_tx = state_tx.clone();
+        let stream_idx = decode_ctx.stream_idx() as usize;
+        let av_stream = demux_ctx
+            .ifmt_ctx_mut()
+            .streams()
+            .get(stream_idx)
+            .ok_or_else(|| {
+                PlayerError::Error(format!("根据 video stream_idx 无法获取到 video stream"))
+            })?;
+        let time_base = av_stream.time_base;
         std::thread::spawn(move || {
-            video_decode_thread(decode_ctx, state_tx);
+            video_decode_thread(decode_ctx, state_tx, time_base);
         });
     }
 
@@ -86,12 +93,10 @@ pub fn demux_init(
             PlayerError::Error(format!("根据 video stream_idx 无法获取到 video stream"))
         })?;
         vdec_ctx.apply_codecpar(av_stream.codecpar())?;
+        vdec_ctx.set_framerate(av_stream.guess_framerate().unwrap());
 
-        if let Some(framerate) = av_stream.guess_framerate() {
-            log::info!("framerate: {:?}", &framerate);
-            vdec_ctx.set_framerate(framerate);
-        }
         vdec_ctx.open(None)?;
+
         Some((stream_idx, vdec_ctx))
     } else {
         None
@@ -177,6 +182,10 @@ impl DemuxContext {
         } else {
             None
         }
+    }
+
+    pub fn ifmt_ctx_mut(&mut self) -> &mut AVFormatContextInput {
+        &mut self.ifmt_ctx
     }
 
     /// return (video_stream_id, audio_stream_id)

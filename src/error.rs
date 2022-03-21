@@ -4,9 +4,9 @@ use rsmpeg::error::RsmpegError;
 use thiserror::Error;
 
 // #[non_exhaustive]
-#[derive(Error, Debug, Eq, PartialEq)]
+#[derive(Error, Debug, Clone, Eq, PartialEq)]
 pub enum PlayerError {
-    #[error("E: {0}")]
+    #[error("{0}")]
     Error(String),
 
     #[error("未知错误, 请联系开发人员.")]
@@ -20,6 +20,15 @@ pub enum PlayerError {
 
     #[error("队列为空")]
     PacketQueueEmpty,
+
+    #[error("没有音频设备")]
+    NoAudioDevice,
+
+    #[error("获取默认音频流配置失败({0})")]
+    DefaultAudioStreamConfigError(String),
+
+    #[error("创建音频流失败({0})")]
+    CreateAudioStreamError(String),
 }
 
 pub type Result<T> = std::result::Result<T, PlayerError>;

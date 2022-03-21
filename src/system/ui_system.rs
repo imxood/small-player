@@ -5,7 +5,7 @@ use bevy_egui::{
 };
 
 use crate::{
-    resources::event::PlayerEvent,
+    resources::event::{PlayEvent, PlayerEvent},
     ui::{
         play_content::PlayContentView, play_control::VideoControl, play_list::VideoListView,
         titlebar_ui::Titlebar, ui_state::UiState,
@@ -18,6 +18,7 @@ pub fn update_ui(
     mut egui_ctx: ResMut<EguiContext>,
     mut ui_state: ResMut<UiState>,
     mut player_event: EventWriter<PlayerEvent>,
+    mut play_evt: EventWriter<PlayEvent>,
 ) {
     let ctx = egui_ctx.ctx_mut();
     let ui_state = &mut *ui_state;
@@ -37,7 +38,7 @@ pub fn update_ui(
         .frame(frame)
         .show(ctx, |ui| {
             // Titlebar::show(ctx, ui, exit, windows, &mut ui_state, winit_windows)
-            VideoControl::show(ctx, ui, ui_state, &mut player_event);
+            VideoControl::show(ctx, ui, ui_state, &mut player_event, &mut play_evt);
         });
 
     // 先显示 right pannel, 再显示 center panel, 是因为一些 center panel 的宽度 需要动态计算.

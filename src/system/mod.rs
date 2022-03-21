@@ -7,4 +7,5 @@ pub mod play_system;
 pub enum GameState {
     Playing,
     Stop,
+    Restart,
 }

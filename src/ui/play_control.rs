@@ -1,19 +1,19 @@
 use bevy::prelude::{info, EventWriter};
 use bevy_egui::egui::{vec2, Align2, Area, Color32, Context, Label, Sense, Slider, Ui, Widget};
 
-use crate::resources::event::PlayerEvent;
+use crate::resources::event::{PlayEvent, PlayerEvent};
 
 use super::ui_state::UiState;
 
 pub struct VideoControl {
-    pub volume: u8,
+    pub volume: f32,
     pub mute: bool,
 }
 
 impl VideoControl {
     pub fn new() -> Self {
         Self {
-            volume: 0,
+            volume: 1.0,
             mute: false,
         }
     }
@@ -22,7 +22,8 @@ impl VideoControl {
         ctx: &Context,
         _ui: &mut Ui,
         ui_state: &mut UiState,
-        play_event: &mut EventWriter<PlayerEvent>,
+        player_evt: &mut EventWriter<PlayerEvent>,
+        play_evt: &mut EventWriter<PlayEvent>,
     ) {
         let play_control = &mut ui_state.play_control;
         let play_list_view = &mut ui_state.play_list_view;
@@ -34,35 +35,35 @@ impl VideoControl {
                 ui.visuals_mut().widgets.inactive.bg_fill = Color32::from_rgb(65, 105, 178);
                 ui.horizontal(|ui| {
                     if Label::new("⏮").sense(Sense::click()).ui(ui).clicked() {
-                        play_event.send(PlayerEvent::Previous);
+                        play_evt.send(PlayEvent::Previous);
                     }
                     // if Label::new("⏵").sense(Sense::click()).ui(ui).clicked() {
-                    //     play_event.send(PlayerEvent::Start);
+                    //     player_evt.send(PlayerEvent::Start);
                     // }
                     if Label::new("⏸").sense(Sense::click()).ui(ui).clicked() {
-                        play_event.send(PlayerEvent::Pause);
+                        play_evt.send(PlayEvent::Pause);
                     }
                     if Label::new("⏹").sense(Sense::click()).ui(ui).clicked() {
-                        play_event.send(PlayerEvent::Stop);
+                        player_evt.send(PlayerEvent::Stop);
                     }
                     if Label::new("⏭").sense(Sense::click()).ui(ui).clicked() {
-                        play_event.send(PlayerEvent::Next);
+                        play_evt.send(PlayEvent::Next);
                     }
                     ui.add_space(10.);
 
-                    let (mute_icon, mute) = if play_control.mute || play_control.volume == 0 {
+                    let (mute_icon, mute) = if play_control.mute || play_control.volume == 0.0 {
                         ("🔇", false)
                     } else {
                         ("🔈", true)
                     };
                     if Label::new(mute_icon).sense(Sense::click()).ui(ui).clicked() {
-                        play_event.send(PlayerEvent::Mute(mute));
+                        play_evt.send(PlayEvent::Mute(mute));
                     }
                     if ui
-                        .add(Slider::new(&mut play_control.volume, 0..=100).show_value(false))
+                        .add(Slider::new(&mut play_control.volume, 0.0..=1.0).show_value(false))
                         .changed()
                     {
-                        play_event.send(PlayerEvent::Volume(play_control.volume));
+                        play_evt.send(PlayEvent::Volume(play_control.volume));
                     }
                 });
             });
@@ -78,7 +79,7 @@ impl VideoControl {
                     }
                     if Label::new("🗁").sense(Sense::click()).ui(ui).clicked() {
                         info!("🗁");
-                        play_event.send(PlayerEvent::OpenFolder);
+                        player_evt.send(PlayerEvent::OpenFolder);
                     }
                 });
             });

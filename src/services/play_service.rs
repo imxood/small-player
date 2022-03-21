@@ -21,8 +21,8 @@ unsafe impl Sync for PlayService {}
 
 impl PlayService {
     pub fn create(filename: String) -> Result<Self> {
-        let (cmd_tx, cmd_rx) = bounded::<Command>(8);
-        let (state_tx, state_rx) = bounded::<PlayState>(8);
+        let (cmd_tx, cmd_rx) = bounded::<Command>(2);
+        let (state_tx, state_rx) = bounded::<PlayState>(2);
         decode(filename, cmd_rx, state_tx)?;
         Ok(Self {
             cmd_tx,
@@ -38,6 +38,16 @@ impl PlayService {
     pub fn pause(&self) {
         if let Err(e) = self.cmd_tx.try_send(Command::Pause) {
             log::error!("发送 Command::Pause 失败, E: {}", e.to_string());
+        }
+    }
+
+    pub fn set_volume(&self, volume: f32) {
+        if let Err(e) = self.cmd_tx.try_send(Command::Volume(volume)) {
+            log::error!(
+                "try_send cmd Volume({}) failed, E: {}",
+                volume,
+                e.to_string()
+            );
         }
     }
 

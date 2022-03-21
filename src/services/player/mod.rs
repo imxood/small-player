@@ -3,16 +3,21 @@ use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::{collections::LinkedList, sync::atomic::Ordering};
 
-use parking_lot::{Mutex, MutexGuard};
+use parking_lot::Mutex;
 use rsmpeg::avcodec::AVPacket;
 
+use crate::error::PlayerError;
+
+pub mod audio;
 pub mod decode;
 pub mod demux;
 pub mod stream;
+pub mod video;
 
 pub enum Command {
     Stop,
     Pause,
+    Volume(f32),
 }
 
 // Send + Sync + Clone + Eq + Debug + Hash
@@ -24,7 +29,7 @@ pub enum PlayState {
     Pausing,
     Stopped,
     Video(VideoFrame),
-    Audio,
+    Error(PlayerError),
 }
 
 impl Default for PlayState {
@@ -106,8 +111,6 @@ impl VideoFrame {
     }
 }
 
-pub struct AudioFrame {}
-
 pub enum StreamType {
     Video,
     Audio,
@@ -118,8 +121,7 @@ pub struct PlayControl {
     abort_request: Arc<AtomicBool>,
     pause: Arc<AtomicBool>,
     demux_finished: Arc<AtomicBool>,
-    video_finished: Arc<AtomicBool>,
-    audio_finished: Arc<AtomicBool>,
+    volume: Arc<Mutex<f32>>,
 }
 
 impl PlayControl {
@@ -127,18 +129,21 @@ impl PlayControl {
         let abort_request = Arc::new(AtomicBool::new(false));
         let pause = Arc::new(AtomicBool::new(false));
         let demux_finished = Arc::new(AtomicBool::new(false));
-        // 视频解码和音频解码 默认是已完成
-        // 在实际处理时, 在解封装期间 解析到了 packet 时, 会更新为 false
-        let video_finished = Arc::new(AtomicBool::new(true));
-        let audio_finished = Arc::new(AtomicBool::new(true));
         // 如果 解封装 视频解码 音频解码 都成功, 那么
         Self {
             pause,
             abort_request,
             demux_finished,
-            video_finished,
-            audio_finished,
+            volume: Arc::new(Mutex::new(1.0)),
         }
+    }
+
+    pub fn set_volume(&self, volume: f32) {
+        *self.volume.lock() = volume;
+    }
+
+    pub fn volume(&self) -> f32 {
+        *self.volume.lock()
     }
 
     pub fn set_abort_request(&self, abort_request: bool) {
@@ -164,67 +169,6 @@ impl PlayControl {
     pub fn demux_finished(&self) -> bool {
         self.demux_finished.load(Ordering::Relaxed)
     }
-
-    // pub fn set_video_finished(&self, video_finished: bool) {
-    //     self.video_finished.store(video_finished, Ordering::Relaxed);
-    // }
-
-    // pub fn video_finished(&self) -> bool {
-    //     self.video_finished.load(Ordering::Relaxed)
-    // }
-
-    // pub fn set_audio_finished(&self, audio_finished: bool) {
-    //     self.audio_finished.store(audio_finished, Ordering::Relaxed);
-    // }
-
-    // pub fn audio_finished(&self) -> bool {
-    //     self.audio_finished.load(Ordering::Relaxed)
-    // }
-
-    // pub fn is_finished(&self) -> bool {
-    //     self.demux_finished() && self.video_finished() && self.audio_finished()
-    // }
-}
-
-#[derive(Clone)]
-struct LockedPacketQueue(Arc<Mutex<PacketQueue>>);
-
-impl LockedPacketQueue {
-    // pub fn new(stream_idx: i32) -> Self {
-    //     Self(Arc::new(Mutex::new(PacketQueue::new(stream_idx))))
-    // }
-
-    pub fn stream_idx(&self) -> i32 {
-        self.0.lock().stream_idx
-    }
-
-    pub fn set_max_mem_size(&self, max_size: i32) {
-        self.0.lock().set_max_mem_size(max_size);
-    }
-
-    #[inline]
-    pub fn is_full(&self) -> bool {
-        self.0.lock().is_full()
-    }
-
-    #[inline]
-    pub fn is_empty(&self) -> bool {
-        self.0.lock().is_empty()
-    }
-
-    /// 向结尾追加一个包
-    pub fn push(&mut self, pkt: AVPacket) {
-        self.0.lock().push(pkt);
-    }
-
-    // 从开头取出一个包
-    pub fn pop(&self) -> Option<AVPacket> {
-        self.0.lock().pop()
-    }
-
-    pub fn lock(&self) -> MutexGuard<PacketQueue> {
-        self.0.lock()
-    }
 }
 
 pub struct PacketQueue {
@@ -242,6 +186,10 @@ impl PacketQueue {
             max_mem_size,
             stream_idx,
         }
+    }
+
+    pub fn mem_size(&self) -> i32 {
+        self.mem_size
     }
 
     pub fn stream_idx(&self) -> i32 {
@@ -264,7 +212,6 @@ impl PacketQueue {
 
     pub fn push(&mut self, pkt: AVPacket) {
         self.mem_size += pkt.size;
-        log::info!("pkt.size: {:5} mem_size: {:8}", pkt.size, self.mem_size);
         self.queue.push_back(pkt);
     }
 
