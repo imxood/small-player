@@ -1,4 +1,6 @@
+use crossbeam_channel::TrySendError;
 use parking_lot::Mutex;
+use rodio::buffer::SamplesBuffer;
 use rsmpeg::avcodec::AVCodecContext;
 use rsmpeg::avcodec::AVPacket;
 use rsmpeg::avutil::AVFrame;
@@ -7,6 +9,7 @@ use rsmpeg::ffi::{self};
 use std::sync::Arc;
 use std::time::Duration;
 
+use super::PlayState;
 use super::{PacketQueue, PlayControl};
 use crate::error::{PlayerError, Result};
 
@@ -23,6 +26,21 @@ impl DecodeContext {
             ctrl,
             queue,
         }
+    }
+
+    pub fn send_audio(&self, audio_source: SamplesBuffer<f32>) {
+        self.ctrl.play_audio(audio_source);
+    }
+
+    pub fn send_state(
+        &self,
+        state: PlayState,
+    ) -> core::result::Result<(), TrySendError<PlayState>> {
+        self.ctrl.state_tx.try_send(state)
+    }
+
+    pub fn audio_default_config(&self) -> cpal::SupportedStreamConfig {
+        self.ctrl.audio_default_config()
     }
 
     pub fn volume(&self) -> f32 {
@@ -82,13 +100,15 @@ pub fn decode_frame(decode_ctx: &mut DecodeContext) -> Result<Option<AVFrame>> {
             Err(e) => return Err(PlayerError::Error(e.to_string())),
         }
 
-        if decode_ctx.cancel() {
-            return Ok(None);
-        }
-        // 已暂停 / Packet中没有数据
-        if decode_ctx.pause() {
+        loop {
+            if decode_ctx.cancel() {
+                return Ok(None);
+            }
+            // 已暂停 / Packet中没有数据
+            if !decode_ctx.pause() {
+                break;
+            }
             spin_sleep::sleep(Duration::from_millis(20));
-            continue;
         }
 
         if retry_send_packet {

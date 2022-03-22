@@ -20,8 +20,7 @@ impl VideoListView {
         ui_state: &mut UiState,
         player_event: &mut EventWriter<PlayerEvent>,
     ) {
-        let play_list_view = &ui_state.play_list_view;
-        if !play_list_view.open {
+        if !ui_state.open_list {
             return;
         }
 
@@ -41,18 +40,20 @@ impl VideoListView {
                             if res.clicked() {
                                 ui_state.choose_file = Some(video.clone());
                             }
+
                             if res.double_clicked() {
-                                log::info!("双击 {}", video);
                                 player_event.send(PlayerEvent::Start(video.clone()));
                             }
 
                             res.context_menu(|ui| {
-                                if ui.button("移除").clicked() {
-                                    ui_state.play_list.retain(|v| v != video);
+                                ui_state.choose_file = Some(video.clone());
+
+                                if ui.button("播放").clicked() {
+                                    player_event.send(PlayerEvent::Start(video.clone()));
                                     ui.close_menu();
                                     return;
                                 }
-                                if ui.button("!!! 删除(源文件)").clicked() {
+                                if ui.button("移除").clicked() {
                                     ui_state.play_list.retain(|v| v != video);
                                     ui.close_menu();
                                     return;

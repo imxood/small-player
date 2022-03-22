@@ -1,28 +1,26 @@
 use std::time::Duration;
 
-use crossbeam_channel::{Receiver, Sender, TryRecvError};
+use crossbeam_channel::{Receiver, TryRecvError};
 
 use crate::services::player::decode::DemuxContext;
-use crate::services::player::{Command, PlayState, StreamType};
+use crate::services::player::{Command, StreamType};
 
-pub fn demux_thread(
-    mut demux_ctx: DemuxContext,
-    cmd_rx: Receiver<Command>,
-    state_tx: Sender<PlayState>,
-) {
+pub fn demux_thread(mut demux_ctx: DemuxContext, cmd_rx: Receiver<Command>) {
     let (video_stream_idx, audio_stream_idx) = demux_ctx.stream_idx();
     loop {
         match cmd_rx.try_recv() {
             Ok(Command::Stop) => {
-                demux_ctx.ctrl.set_abort_request(true);
-                state_tx.send(PlayState::Stopped).ok();
                 log::info!("run abort_request cmd");
+                demux_ctx.ctrl.set_abort_request(true);
                 break;
             }
-            Ok(Command::Pause) => {
+            Ok(Command::Pause(pause)) => {
                 log::info!("run pause cmd");
-                demux_ctx.ctrl.set_pause(true);
-                state_tx.send(PlayState::Pausing).ok();
+                demux_ctx.ctrl.set_pause(pause);
+            }
+            Ok(Command::Mute(mute)) => {
+                log::info!("recv mute command: {mute}");
+                demux_ctx.ctrl.set_mute(mute);
             }
             Ok(Command::Volume(volume)) => {
                 log::info!("recv volume command: {volume}");

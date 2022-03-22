@@ -24,24 +24,34 @@ impl PlayService {
         let (cmd_tx, cmd_rx) = bounded::<Command>(2);
         let (state_tx, state_rx) = bounded::<PlayState>(2);
         decode(filename, cmd_rx, state_tx)?;
-        Ok(Self {
+        let this = Self {
             cmd_tx,
             state_rx,
             stopped: false,
-        })
+        };
+        Ok(this)
     }
 
     pub fn is_stopped(&self) -> bool {
         self.stopped
     }
 
-    pub fn pause(&self) {
-        if let Err(e) = self.cmd_tx.try_send(Command::Pause) {
+    pub fn set_pause(&self, pause: bool) {
+        log::info!("play service pause");
+        if let Err(e) = self.cmd_tx.try_send(Command::Pause(pause)) {
+            log::error!("发送 Command::Pause 失败, E: {}", e.to_string());
+        }
+    }
+
+    pub fn set_mute(&self, mute: bool) {
+        log::info!("play service pause");
+        if let Err(e) = self.cmd_tx.try_send(Command::Mute(mute)) {
             log::error!("发送 Command::Pause 失败, E: {}", e.to_string());
         }
     }
 
     pub fn set_volume(&self, volume: f32) {
+        log::info!("play service set volume: {volume}");
         if let Err(e) = self.cmd_tx.try_send(Command::Volume(volume)) {
             log::error!(
                 "try_send cmd Volume({}) failed, E: {}",

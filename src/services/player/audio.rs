@@ -1,24 +1,17 @@
 use std::ffi::CString;
+use std::io::Write;
 use std::time::{Duration, Instant};
 
 use cpal::traits::HostTrait;
 use cpal::SupportedStreamConfig;
-use crossbeam_channel::Sender;
 use rodio::buffer::SamplesBuffer;
 use rodio::{DeviceTrait, OutputStream, Sample, Sink, Source};
 use rsmpeg::avfilter::AVFilterGraph;
 
 use crate::error::{PlayerError, Result};
 use crate::services::player::stream::{decode_frame, DecodeContext};
-use crate::services::player::PlayState;
 
-pub fn audio_decode_thread(mut decode_ctx: DecodeContext, state_tx: Sender<PlayState>) {
-    let audio_dev = AudioDevice::new()
-        .map_err(|e| {
-            state_tx.send(PlayState::Error(e)).ok();
-        })
-        .unwrap();
-
+pub fn audio_decode_thread(mut decode_ctx: DecodeContext) {
     let mut audio_graph = None;
 
     let start = Instant::now();
@@ -27,13 +20,16 @@ pub fn audio_decode_thread(mut decode_ctx: DecodeContext, state_tx: Sender<PlayS
 
     let mut first_time = Option::<Duration>::None;
     let mut pts = Duration::default();
+    let mut new_pts = Duration::default();
+
+    let mut pcm_file = std::fs::File::create("test_volume0.2.pcm").unwrap();
 
     loop {
-        let source = fetch_audio_source(&mut decode_ctx, &mut audio_graph, &audio_dev);
+        let source = fetch_audio_source(&mut decode_ctx, &mut audio_graph, &mut pcm_file);
         let source = match source {
             Ok(None) => break,
             Ok(Some((source, _pts))) => {
-                pts = _pts;
+                new_pts = _pts;
                 source
             }
             Err(e) => {
@@ -45,17 +41,28 @@ pub fn audio_decode_thread(mut decode_ctx: DecodeContext, state_tx: Sender<PlayS
         // 预取操作可以让当前帧播放结束后, 下一帧立即播放, 时间误差会极小
         loop {
             if first_time.is_none() {
+                pts = new_pts;
                 duration = source.total_duration().unwrap();
+                decode_ctx.send_audio(source);
                 first_time = Some(start.elapsed());
-                log::info!(
+                log::debug!(
                     "audio pts: {pts:?}, duration: {:?}ms",
                     &duration.as_millis()
                 );
-                audio_dev.play_source(source, decode_ctx.volume());
                 break;
             } else {
-                let duration = first_time.take().unwrap() + duration - start.elapsed();
-                spin_sleep::sleep(duration);
+                let elapsed = start.elapsed() - first_time.take().unwrap();
+                // 暂停会导致 elapsed 太大
+                if elapsed > duration {
+                    continue;
+                }
+                // 剩余的延时时间
+                let duration = duration - elapsed;
+                // 当前 帧的显示时间 要在合适的范围
+                let cur = start.elapsed();
+                if pts >= cur && pts <= cur + duration {
+                    spin_sleep::sleep(duration);
+                }
             }
         }
     }
@@ -65,7 +72,7 @@ pub fn audio_decode_thread(mut decode_ctx: DecodeContext, state_tx: Sender<PlayS
 pub fn fetch_audio_source(
     decode_ctx: &mut DecodeContext,
     audio_graph: &mut Option<AVFilterGraph>,
-    audio_dev: &AudioDevice,
+    pcm_file: &mut std::fs::File,
 ) -> Result<Option<(SamplesBuffer<f32>, Duration)>> {
     let raw_frame = match decode_frame(decode_ctx) {
         Ok(None) => {
@@ -84,7 +91,7 @@ pub fn fetch_audio_source(
     );
 
     if audio_graph.is_none() {
-        let default_config = audio_dev.default_config_ref();
+        let default_config = decode_ctx.audio_default_config();
         *audio_graph = Some(
             audio_graph_parse(
                 raw_frame.sample_rate,
@@ -119,14 +126,15 @@ pub fn fetch_audio_source(
 
     let data_len = frame.nb_samples as usize * frame.channels as usize;
 
-    let samples = unsafe {
-        #[allow(clippy::cast_ptr_alignment)]
-        std::slice::from_raw_parts(frame.data[0] as *const i32, data_len)
-    };
-    let samples: Vec<f32> = samples
-        .iter()
-        .map(|v| (*v as f32) / i32::MAX as f32)
-        .collect();
+    let volume = decode_ctx.volume();
+    let samples = unsafe { std::slice::from_raw_parts(frame.data[0] as *const f32, data_len) };
+    let samples: Vec<f32> = samples.iter().map(|s| s * volume).collect();
+
+    {
+        let samples =
+            unsafe { std::slice::from_raw_parts(samples.as_ptr() as *const u8, data_len * 4) };
+        pcm_file.write_all(samples).unwrap();
+    }
 
     let source = SamplesBuffer::new(frame.channels as u16, frame.sample_rate as u32, samples);
 
@@ -154,7 +162,7 @@ pub fn audio_graph_parse(
     );
 
     let format_filter = format!(
-        "[audio0_src] aformat=sample_rates={}:sample_fmts=s32:channel_layouts=stereo [audio0_out]",
+        "[audio0_src] aformat=sample_rates={}:sample_fmts=flt:channel_layouts=stereo [audio0_out]",
         dst_sample_rate
     );
 
@@ -214,36 +222,41 @@ impl AudioDevice {
         })
     }
 
-    pub fn default_config_ref(&self) -> &SupportedStreamConfig {
-        &self.default_config
+    pub fn default_config(&self) -> SupportedStreamConfig {
+        self.default_config.clone()
     }
 
-    pub fn play_source<S>(&self, audio_source: S, volume: f32)
+    pub fn play_source<S>(&self, audio_source: S)
     where
         S: Source + Send + 'static,
         S::Item: Sample,
         S::Item: Send,
     {
         self.sink.append(audio_source);
-        self.sink.set_speed(volume);
     }
 
-    pub fn pause(&self) {
-        self.sink.pause();
+    pub fn set_mute(&self, mute: bool) {
+        if mute {
+            self.sink.set_volume(0.0);
+        } else {
+            self.sink.set_volume(1.0);
+        }
     }
 
-    pub fn play(&self) {
-        self.sink.play();
+    pub fn set_pause(&self, pause: bool) {
+        if pause {
+            self.sink.pause();
+        } else {
+            self.sink.play();
+        }
     }
 
     pub fn stop(&self) {
         self.sink.stop();
     }
-
-    pub fn set_volume(&self, value: f32) {
-        self.sink.set_volume(value);
-    }
 }
+
+unsafe impl Send for AudioDevice {}
 
 // #[derive(Clone)]
 // pub struct AudioSource {

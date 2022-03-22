@@ -20,9 +20,7 @@ pub enum PlayerEvent {
 
 pub enum PlayEvent {
     /// 暂停
-    Pause,
-    /// 当前播放结束
-    END,
+    Pause(bool),
     /// 上一首
     Previous,
     /// 下一首

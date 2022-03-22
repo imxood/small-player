@@ -11,8 +11,11 @@ use rsmpeg::{
 use crate::error::{PlayerError, Result};
 
 use super::{
-    audio::audio_decode_thread, demux::demux_thread, stream::DecodeContext,
-    video::video_decode_thread, Command, PacketQueue, PlayControl, PlayState, StreamType,
+    audio::{audio_decode_thread, AudioDevice},
+    demux::demux_thread,
+    stream::DecodeContext,
+    video::video_decode_thread,
+    Command, PacketQueue, PlayControl, PlayState, StreamType,
 };
 
 pub fn decode(
@@ -22,14 +25,20 @@ pub fn decode(
 ) -> Result<()> {
     let (ifmt_ctx, vdec, adec) = demux_init(filename)?;
 
-    let mut demux_ctx = DemuxContext::new(ifmt_ctx);
+    let mut demux_ctx = DemuxContext::new(ifmt_ctx, state_tx);
 
     let video_decode_ctx = demux_ctx.build_decode_ctx(vdec, StreamType::Video);
     let audio_decode_ctx = demux_ctx.build_decode_ctx(adec, StreamType::Audio);
 
+    // 音频解码线程
+    if let Some(decode_ctx) = audio_decode_ctx {
+        std::thread::spawn(move || {
+            audio_decode_thread(decode_ctx);
+        });
+    }
+
     // 视频解码线程
     if let Some(decode_ctx) = video_decode_ctx {
-        let state_tx = state_tx.clone();
         let stream_idx = decode_ctx.stream_idx() as usize;
         let av_stream = demux_ctx
             .ifmt_ctx_mut()
@@ -40,22 +49,13 @@ pub fn decode(
             })?;
         let time_base = av_stream.time_base;
         std::thread::spawn(move || {
-            video_decode_thread(decode_ctx, state_tx, time_base);
-        });
-    }
-
-    // 音频解码线程
-    if let Some(decode_ctx) = audio_decode_ctx {
-        let state_tx = state_tx.clone();
-        std::thread::spawn(move || {
-            audio_decode_thread(decode_ctx, state_tx);
+            video_decode_thread(decode_ctx, time_base);
         });
     }
 
     // 解封装线程
     std::thread::spawn(move || {
-        let state_tx = state_tx.clone();
-        demux_thread(demux_ctx, cmd_rx, state_tx);
+        demux_thread(demux_ctx, cmd_rx);
     });
 
     Ok(())
@@ -140,7 +140,7 @@ impl DemuxContext {
     pub const UNKNOWN_STREAM_IDX: i32 = -1;
     pub const MAX_MEM_SIZE: i32 = 16 * 1024 * 1024;
 
-    pub fn new(ifmt_ctx: AVFormatContextInput) -> Self {
+    pub fn new(ifmt_ctx: AVFormatContextInput, state_tx: Sender<PlayState>) -> Self {
         let video_queue = Arc::new(Mutex::new(PacketQueue::new(
             Self::UNKNOWN_STREAM_IDX,
             Self::MAX_MEM_SIZE,
@@ -149,9 +149,21 @@ impl DemuxContext {
             Self::UNKNOWN_STREAM_IDX,
             Self::MAX_MEM_SIZE,
         )));
+
+        // 获取音频设备
+        let audio_dev = AudioDevice::new()
+            .map_err(|e| {
+                state_tx.send(PlayState::Error(e)).ok();
+            })
+            .unwrap();
+        let audio_dev = Arc::new(Mutex::new(audio_dev));
+
+        // 控制播放器的行为
+        let ctrl = PlayControl::new(audio_dev, state_tx);
+
         Self {
             ifmt_ctx,
-            ctrl: PlayControl::new(),
+            ctrl,
             video_queue,
             audio_queue,
         }

@@ -3,10 +3,14 @@ use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::{collections::LinkedList, sync::atomic::Ordering};
 
+use crossbeam_channel::Sender;
 use parking_lot::Mutex;
+use rodio::buffer::SamplesBuffer;
 use rsmpeg::avcodec::AVPacket;
 
 use crate::error::PlayerError;
+
+use self::audio::AudioDevice;
 
 pub mod audio;
 pub mod decode;
@@ -16,7 +20,8 @@ pub mod video;
 
 pub enum Command {
     Stop,
-    Pause,
+    Pause(bool),
+    Mute(bool),
     Volume(f32),
 }
 
@@ -26,7 +31,7 @@ pub enum PlayState {
     Start,
     Loading,
     Playing,
-    Pausing,
+    Pausing(bool),
     Stopped,
     Video(VideoFrame),
     Error(PlayerError),
@@ -52,19 +57,15 @@ pub struct VideoFrame {
     pub data: Vec<u8>,
     pub width: usize,
     pub height: usize,
-    pub pts: f64,
-    pub duration: f64,
 }
 
 impl ToString for VideoFrame {
     fn to_string(&self) -> String {
         format!(
-            "VideoFrame: len {}, width {}, height {}, pts {}, duration {}",
+            "VideoFrame: len {}, width {}, height {}",
             self.data.len(),
             self.width,
             self.height,
-            self.pts,
-            self.duration,
         )
     }
 }
@@ -74,21 +75,12 @@ impl Debug for VideoFrame {
         f.debug_struct("VideoFrame")
             .field("width", &self.width)
             .field("height", &self.height)
-            .field("pts", &self.pts)
-            .field("duration", &self.duration)
             .finish()
     }
 }
 
 impl VideoFrame {
-    pub fn from(
-        raw_data: *const u8,
-        width: usize,
-        height: usize,
-        line_size: usize,
-        pts: f64,
-        duration: f64,
-    ) -> Self {
+    pub fn from(raw_data: *const u8, width: usize, height: usize, line_size: usize) -> Self {
         let raw_data = unsafe { std::slice::from_raw_parts(raw_data, height * line_size) };
         let mut data: Vec<u8> = vec![0; width * height * 4];
         let data_slice = data.as_mut_slice();
@@ -105,8 +97,6 @@ impl VideoFrame {
             data,
             width,
             height,
-            pts,
-            duration,
         }
     }
 }
@@ -121,11 +111,13 @@ pub struct PlayControl {
     abort_request: Arc<AtomicBool>,
     pause: Arc<AtomicBool>,
     demux_finished: Arc<AtomicBool>,
+    audio_dev: Arc<Mutex<AudioDevice>>,
     volume: Arc<Mutex<f32>>,
+    state_tx: Sender<PlayState>,
 }
 
 impl PlayControl {
-    pub fn new() -> Self {
+    pub fn new(audio_dev: Arc<Mutex<AudioDevice>>, state_tx: Sender<PlayState>) -> Self {
         let abort_request = Arc::new(AtomicBool::new(false));
         let pause = Arc::new(AtomicBool::new(false));
         let demux_finished = Arc::new(AtomicBool::new(false));
@@ -134,8 +126,14 @@ impl PlayControl {
             pause,
             abort_request,
             demux_finished,
+            audio_dev,
             volume: Arc::new(Mutex::new(1.0)),
+            state_tx,
         }
+    }
+
+    pub fn set_mute(&self, mute: bool) {
+        self.audio_dev.lock().set_mute(mute);
     }
 
     pub fn set_volume(&self, volume: f32) {
@@ -148,6 +146,8 @@ impl PlayControl {
 
     pub fn set_abort_request(&self, abort_request: bool) {
         self.abort_request.store(abort_request, Ordering::Relaxed);
+        self.audio_dev.lock().stop();
+        self.state_tx.send(PlayState::Stopped).ok();
     }
 
     pub fn abort_request(&self) -> bool {
@@ -156,6 +156,8 @@ impl PlayControl {
 
     pub fn set_pause(&self, pause: bool) {
         self.pause.store(pause, Ordering::Relaxed);
+        self.audio_dev.lock().set_pause(pause);
+        self.state_tx.send(PlayState::Pausing(pause)).ok();
     }
 
     pub fn pause(&self) -> bool {
@@ -168,6 +170,14 @@ impl PlayControl {
 
     pub fn demux_finished(&self) -> bool {
         self.demux_finished.load(Ordering::Relaxed)
+    }
+
+    pub fn audio_default_config(&self) -> cpal::SupportedStreamConfig {
+        self.audio_dev.lock().default_config()
+    }
+
+    pub fn play_audio(&self, audio_source: SamplesBuffer<f32>) {
+        self.audio_dev.lock().play_source(audio_source);
     }
 }
 

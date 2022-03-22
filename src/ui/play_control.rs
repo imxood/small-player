@@ -5,19 +5,12 @@ use crate::resources::event::{PlayEvent, PlayerEvent};
 
 use super::ui_state::UiState;
 
+#[derive(Default)]
 pub struct VideoControl {
-    pub volume: f32,
     pub mute: bool,
 }
 
 impl VideoControl {
-    pub fn new() -> Self {
-        Self {
-            volume: 1.0,
-            mute: false,
-        }
-    }
-
     pub fn show(
         ctx: &Context,
         _ui: &mut Ui,
@@ -25,9 +18,6 @@ impl VideoControl {
         player_evt: &mut EventWriter<PlayerEvent>,
         play_evt: &mut EventWriter<PlayEvent>,
     ) {
-        let play_control = &mut ui_state.play_control;
-        let play_list_view = &mut ui_state.play_list_view;
-
         Area::new("video_ctl_1")
             .movable(false)
             .anchor(Align2::CENTER_BOTTOM, vec2(0., -8.))
@@ -37,11 +27,14 @@ impl VideoControl {
                     if Label::new("⏮").sense(Sense::click()).ui(ui).clicked() {
                         play_evt.send(PlayEvent::Previous);
                     }
-                    // if Label::new("⏵").sense(Sense::click()).ui(ui).clicked() {
-                    //     player_evt.send(PlayerEvent::Start);
-                    // }
-                    if Label::new("⏸").sense(Sense::click()).ui(ui).clicked() {
-                        play_evt.send(PlayEvent::Pause);
+                    if ui_state.pause {
+                        if Label::new("⏵").sense(Sense::click()).ui(ui).clicked() {
+                            play_evt.send(PlayEvent::Pause(false));
+                        }
+                    } else {
+                        if Label::new("⏸").sense(Sense::click()).ui(ui).clicked() {
+                            play_evt.send(PlayEvent::Pause(true));
+                        }
                     }
                     if Label::new("⏹").sense(Sense::click()).ui(ui).clicked() {
                         player_evt.send(PlayerEvent::Stop);
@@ -51,7 +44,7 @@ impl VideoControl {
                     }
                     ui.add_space(10.);
 
-                    let (mute_icon, mute) = if play_control.mute || play_control.volume == 0.0 {
+                    let (mute_icon, mute) = if ui_state.mute || ui_state.volume == 0.0 {
                         ("🔇", false)
                     } else {
                         ("🔈", true)
@@ -60,10 +53,10 @@ impl VideoControl {
                         play_evt.send(PlayEvent::Mute(mute));
                     }
                     if ui
-                        .add(Slider::new(&mut play_control.volume, 0.0..=1.0).show_value(false))
+                        .add(Slider::new(&mut ui_state.volume, 0.0..=1.0).show_value(false))
                         .changed()
                     {
-                        play_evt.send(PlayEvent::Volume(play_control.volume));
+                        play_evt.send(PlayEvent::Volume(ui_state.volume));
                     }
                 });
             });
@@ -75,7 +68,7 @@ impl VideoControl {
                 ui.horizontal(|ui| {
                     if Label::new("☯").sense(Sense::click()).ui(ui).clicked() {
                         info!("☯");
-                        play_list_view.open = !play_list_view.open;
+                        ui_state.open_list = !ui_state.open_list;
                     }
                     if Label::new("🗁").sense(Sense::click()).ui(ui).clicked() {
                         info!("🗁");

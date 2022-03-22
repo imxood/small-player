@@ -27,7 +27,7 @@
 
 #### ubuntu
 
-?? 忘了环境是怎么配的, 这么装应该就可以了
+?? 忘了环境是怎么配的, 这么装应该可以
 
 sudo apt install ffmpeg
 
@@ -36,6 +36,8 @@ sudo apt install ffmpeg
     如果是 debug 版本, 在执行 解码后的Rgb数据 转 egui的 Color Image时 会特别慢, release版本会有优化
 
     cargo run --release
+
+设置环境变量 "WGPU_BACKEND=.." 可以给wgpu选择不同的后端, 如: WGPU_BACKEND=gl, 使用opengl.
 
 ## 学习记录
 
@@ -66,16 +68,20 @@ sudo apt install ffmpeg
 
 ### AV_DISPOSITION_ATTACHED_PIC
 
-判断流中绑定了图片
+对于mp3文件 判断流中是否绑定了图片
 
     av_stream.disposition & AV_DISPOSITION_ATTACHED_PIC
 
-对于一个有封面的mp3文件, 它可以包含 audio stream 和 video stream, 它的 video stream 中只包含了一个包, 那么就可以通过 video_stream.disposition 判断这个流中保存了一个绑定图片, 同时不应该向这个
+对于一个有封面的mp3文件, 它可以包含 audio stream 和 video stream, 它的 video stream 中只包含了一个包, 那么就可以通过 video_stream.disposition 判断这个流中保存了一个绑定图片
 
 学习自: [FFmpeg小点记】AV_DISPOSITION_ATTACHED_PIC](https://segmentfault.com/a/1190000018373504)
 
-显示音视频文件的Packages信息
+## ffmpeg 常用命令
+    
+```sh
+# 显示音视频文件的Packages信息:
+ffprobe -show_packets -of json -i quliulang.mp3 > packets.json
 
-    ffprobe -show_packets -of json -i quliulang.mp3 > packets.json
-
-WGPU_BACKEND=gl
+# 显示所有可用的封装
+ffmpeg -formats
+```

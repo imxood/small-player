@@ -1,6 +1,4 @@
-use bevy::{
-    prelude::*,
-};
+use bevy::prelude::*;
 use bevy_egui::egui::{self, Align2, Context, Direction, Layout, ScrollArea, Sense, Window};
 
 use crate::{defines::APP_NAME, resources::event::PlayerEvent};
@@ -52,10 +50,10 @@ impl Titlebar {
                         ui.close_menu();
                         player_event.send(PlayerEvent::OpenFolder);
                     }
-                    if ui.button("样式").clicked() {
-                        ui_state.titlebar.trigger_style_ui();
-                        ui.close_menu();
-                    }
+                });
+                ui.menu_button("样式", |ui| {
+                    ui_state.titlebar.trigger_style_ui();
+                    ui.close_menu();
                 });
             });
             ui.with_layout(Layout::right_to_left(), |ui| {

@@ -27,10 +27,6 @@ fn main() {
         std::env::set_var("WGPU_BACKEND", "gl");
     }
     App::new()
-        .insert_resource(WindowDescriptor {
-            vsync: false,
-            ..Default::default()
-        })
         .init_resource::<UiState>()
         .insert_resource(WindowDescriptor {
             decorations: false,

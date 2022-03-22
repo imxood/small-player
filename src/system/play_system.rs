@@ -17,6 +17,7 @@ pub fn start_player(
     if let Some(filename) = choose_file {
         match PlayService::create(filename) {
             Ok(service) => {
+                service.set_volume(ui_state.volume);
                 commands.insert_resource(service);
                 return;
             }
@@ -44,15 +45,25 @@ pub fn update_player(
 ) {
     for event in play_evt.iter() {
         match event {
+            PlayEvent::Pause(pause) => {
+                play_service.set_pause(*pause);
+            }
+            PlayEvent::Mute(mute) => {
+                play_service.set_mute(*mute);
+            }
             PlayEvent::Volume(volume) => {
                 play_service.set_volume(*volume);
             }
             _ => {}
         }
     }
+
     if let Some(state) = play_service.try_recv_state() {
         // log::info!("service - state: {:?}", &state);
         match state {
+            PlayState::Pausing(pause) => {
+                ui_state.pause = pause;
+            }
             _ => ui_state.state = state,
         }
     } else if play_service.is_stopped() {
