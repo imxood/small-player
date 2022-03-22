@@ -1,6 +1,6 @@
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
-use crossbeam_channel::Sender;
+use crossbeam_channel::{Sender, TrySendError};
 use rsmpeg::avutil::AVFrame;
 use rsmpeg::ffi::av_q2d;
 use rsmpeg::ffi::{self, AVRational};
@@ -44,12 +44,15 @@ pub fn video_decode_thread(
         .map_err(|e| log::error!("frame alloc_buffer failed, error: {:?}", e))
         .unwrap();
 
-    let _now = Instant::now();
-
     // 一帧的播放时长
-    let duration = av_q2d(decode_ctx.dec_ctx().framerate);
+    let duration = 1.0 / av_q2d(decode_ctx.dec_ctx().framerate);
     // 时间基, 单位: 秒
     let time_base = av_q2d(time_base);
+
+    let start = Instant::now();
+    let mut first_time = Option::<Duration>::None;
+    let mut pts = 0.0;
+    let mut new_pts = 0.0;
 
     loop {
         let frame = decode_frame(&mut decode_ctx);
@@ -78,21 +81,49 @@ pub fn video_decode_thread(
 
         // best_effort_timestamp 它是以时间基为单位, 表示 best_effort_timestamp 个时间基.
         // 显示时间
-        let pts = raw_frame.best_effort_timestamp as f64 * time_base;
-        log::info!("video pts:{:?}s, time_base:{}", pts, time_base);
 
-        let video_data = VideoFrame::from(
-            rgb_frame.data[0] as *const u8,
-            width as usize,
-            height as usize,
-            rgb_frame.linesize[0] as usize,
-            pts,
-            duration,
-        );
-
-        if let Err(_e) = state_tx.send(PlayState::Video(video_data)) {
-            log::info!("video decode thread disconnected");
-            break;
+        // 取出一帧播放, 预取下一帧后, 再根据 pts(显示时间) 和 duration(间隔), 休眠一定的时间
+        // 预取操作可以让当前帧播放结束后, 下一帧立即播放, 时间误差会极小
+        loop {
+            // 新的frame, pts变成了 new_pts
+            new_pts = raw_frame.best_effort_timestamp as f64 * time_base;
+            if first_time.is_none() {
+                pts = new_pts;
+                let video_data = VideoFrame::from(
+                    rgb_frame.data[0] as *const u8,
+                    width as usize,
+                    height as usize,
+                    rgb_frame.linesize[0] as usize,
+                    pts,
+                    duration,
+                );
+                log::info!("video pts:{:?}s, time_base:{}", pts, time_base);
+                match state_tx.try_send(PlayState::Video(video_data)) {
+                    Ok(_) | Err(TrySendError::Full(_)) => {}
+                    Err(TrySendError::Disconnected(_)) => {
+                        log::info!("video decode thread disconnected");
+                        log::info!("video解码线程退出");
+                        return;
+                    }
+                }
+                first_time = Some(start.elapsed());
+                break;
+            } else {
+                let duration = Duration::from_secs_f64(duration);
+                let pts = Duration::from_secs_f64(pts);
+                let elapsed = start.elapsed() - first_time.take().unwrap();
+                // 暂停会导致 elapsed 太大
+                if elapsed > duration {
+                    continue;
+                }
+                // 剩余的延时时间
+                let duration = duration - elapsed;
+                // 当前 帧的显示时间 要在合适的范围
+                let cur = start.elapsed();
+                if pts >= cur && pts <= cur + duration {
+                    spin_sleep::sleep(duration);
+                }
+            }
         }
     }
 

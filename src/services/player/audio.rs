@@ -41,9 +41,8 @@ pub fn audio_decode_thread(mut decode_ctx: DecodeContext, state_tx: Sender<PlayS
                 break;
             }
         };
-        // 播放当前声音帧， 预取下一声音帧，并延时
-        // 到时间后,  播放下一帧， 预取下下一帧，并延时
-        // ...
+        // 取出一帧播放, 预取下一帧后, 再根据 pts(显示时间) 和 duration(间隔), 休眠一定的时间
+        // 预取操作可以让当前帧播放结束后, 下一帧立即播放, 时间误差会极小
         loop {
             if first_time.is_none() {
                 duration = source.total_duration().unwrap();
@@ -55,7 +54,7 @@ pub fn audio_decode_thread(mut decode_ctx: DecodeContext, state_tx: Sender<PlayS
                 audio_dev.play_source(source, decode_ctx.volume());
                 break;
             } else {
-                let duration = duration - (start.elapsed() - first_time.take().unwrap());
+                let duration = first_time.take().unwrap() + duration - start.elapsed();
                 spin_sleep::sleep(duration);
             }
         }
