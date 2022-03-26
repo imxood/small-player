@@ -15,7 +15,7 @@ pub fn demux_thread(mut demux_ctx: DemuxContext, cmd_rx: Receiver<Command>) {
                 break;
             }
             Ok(Command::Pause(pause)) => {
-                log::info!("run pause cmd");
+                log::info!("run pause cmd: {pause}");
                 demux_ctx.ctrl.set_pause(pause);
             }
             Ok(Command::Mute(mute)) => {
@@ -45,6 +45,7 @@ pub fn demux_thread(mut demux_ctx: DemuxContext, cmd_rx: Receiver<Command>) {
 
         // 解封装完成 且队列为空, 则退出
         if demux_ctx.ctrl.demux_finished()
+            && !demux_ctx.ctrl.playing()
             && demux_ctx.queue_is_empty(StreamType::Video)
             && demux_ctx.queue_is_empty(StreamType::Audio)
         {

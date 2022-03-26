@@ -1,4 +1,5 @@
 #![feature(thread_is_running)]
+#![feature(linked_list_cursors)]
 
 use bevy::{diagnostic::FrameTimeDiagnosticsPlugin, prelude::*};
 use bevy_egui::EguiPlugin;

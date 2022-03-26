@@ -1,10 +1,9 @@
 use std::ffi::CString;
-use std::io::Write;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use std::vec::IntoIter;
 
 use cpal::traits::HostTrait;
 use cpal::SupportedStreamConfig;
-use rodio::buffer::SamplesBuffer;
 use rodio::{DeviceTrait, OutputStream, Sample, Sink, Source};
 use rsmpeg::avfilter::AVFilterGraph;
 
@@ -14,66 +13,28 @@ use crate::services::player::stream::{decode_frame, DecodeContext};
 pub fn audio_decode_thread(mut decode_ctx: DecodeContext) {
     let mut audio_graph = None;
 
-    let start = Instant::now();
-
-    let mut duration = Duration::default();
-
-    let mut first_time = Option::<Duration>::None;
-    let mut pts = Duration::default();
-    let mut new_pts = Duration::default();
-
-    let mut pcm_file = std::fs::File::create("test_volume0.2.pcm").unwrap();
-
     loop {
-        let source = fetch_audio_source(&mut decode_ctx, &mut audio_graph, &mut pcm_file);
-        let source = match source {
+        let source = fetch_audio_source(&mut decode_ctx, &mut audio_graph);
+        let audio = match source {
             Ok(None) => break,
-            Ok(Some((source, _pts))) => {
-                new_pts = _pts;
-                source
-            }
+            Ok(Some(source)) => source,
             Err(e) => {
                 log::error!("{}", e.to_string());
                 break;
             }
         };
-        // 取出一帧播放, 预取下一帧后, 再根据 pts(显示时间) 和 duration(间隔), 休眠一定的时间
-        // 预取操作可以让当前帧播放结束后, 下一帧立即播放, 时间误差会极小
-        loop {
-            if first_time.is_none() {
-                pts = new_pts;
-                duration = source.total_duration().unwrap();
-                decode_ctx.send_audio(source);
-                first_time = Some(start.elapsed());
-                log::debug!(
-                    "audio pts: {pts:?}, duration: {:?}ms",
-                    &duration.as_millis()
-                );
-                break;
-            } else {
-                let elapsed = start.elapsed() - first_time.take().unwrap();
-                // 暂停会导致 elapsed 太大
-                if elapsed > duration {
-                    continue;
-                }
-                // 剩余的延时时间
-                let duration = duration - elapsed;
-                // 当前 帧的显示时间 要在合适的范围
-                let cur = start.elapsed();
-                if pts >= cur && pts <= cur + duration {
-                    spin_sleep::sleep(duration);
-                }
-            }
+        if let Err(_) = decode_ctx.send_audio(audio) {
+            log::info!("audio thread disconnected");
+            break;
         }
     }
-    log::info!("audio解码线程退出, elapsed: {:?}", start.elapsed());
+    log::info!("audio 解码线程退出");
 }
 
 pub fn fetch_audio_source(
     decode_ctx: &mut DecodeContext,
     audio_graph: &mut Option<AVFilterGraph>,
-    pcm_file: &mut std::fs::File,
-) -> Result<Option<(SamplesBuffer<f32>, Duration)>> {
+) -> Result<Option<AudioFrame>> {
     let raw_frame = match decode_frame(decode_ctx) {
         Ok(None) => {
             log::info!("audio decode exited");
@@ -120,25 +81,27 @@ pub fn fetch_audio_source(
         .buffersink_get_frame(None)
         .expect("Get frame from buffer sink failed");
 
+    let data_len = frame.nb_samples as usize * frame.channels as usize;
+
+    // 音频的时间基 就是一个采样的时间, 即 采样率的倒数
     let time_base = 1.0 / frame.sample_rate as f64;
 
-    let pts = Duration::from_secs_f64(time_base * frame.pts as f64);
-
-    let data_len = frame.nb_samples as usize * frame.channels as usize;
+    let pts = time_base * frame.pts as f64;
+    let duration = time_base * data_len as f64;
 
     let volume = decode_ctx.volume();
     let samples = unsafe { std::slice::from_raw_parts(frame.data[0] as *const f32, data_len) };
     let samples: Vec<f32> = samples.iter().map(|s| s * volume).collect();
 
-    {
-        let samples =
-            unsafe { std::slice::from_raw_parts(samples.as_ptr() as *const u8, data_len * 4) };
-        pcm_file.write_all(samples).unwrap();
-    }
+    let source = AudioFrame::new(
+        samples,
+        frame.channels as u16,
+        frame.sample_rate as u32,
+        pts,
+        duration,
+    );
 
-    let source = SamplesBuffer::new(frame.channels as u16, frame.sample_rate as u32, samples);
-
-    Ok(Some((source, pts)))
+    Ok(Some(source))
 }
 
 // AudioDevice::SAMPLE_RATE.0
@@ -257,59 +220,69 @@ impl AudioDevice {
 }
 
 unsafe impl Send for AudioDevice {}
+unsafe impl Sync for AudioDevice {}
 
-// #[derive(Clone)]
-// pub struct AudioSource {
-//     pub samples: IntoIter<f32>,
-//     pub duration: Duration,
-//     pub channels: u16,
-//     pub sample_rate: u32,
-// }
+#[derive(Clone)]
+pub struct AudioFrame {
+    pub samples: IntoIter<f32>,
+    pub channels: u16,
+    pub sample_rate: u32,
+    pub pts: f64,
+    pub duration: f64,
+}
 
-// impl AudioSource {
-//     pub fn from(samples: Vec<f32>, duration: Duration, channels: u16, sample_rate: u32) -> Self {
-//         Self {
-//             samples: samples.into_iter(),
-//             channels,
-//             duration,
-//             sample_rate,
-//         }
-//     }
-// }
+impl AudioFrame {
+    pub fn new(
+        samples: Vec<f32>,
+        channels: u16,
+        sample_rate: u32,
+        pts: f64,
+        duration: f64,
+    ) -> Self {
+        Self {
+            samples: samples.into_iter(),
+            channels,
+            sample_rate,
+            pts,
+            duration,
+        }
+    }
+}
 
-// impl std::fmt::Debug for AudioSource {
-//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//         f.debug_struct("AudioSource")
-//             .field("samples len", &self.samples.len())
-//             .field("duration", &self.duration)
-//             .field("channels", &self.channels)
-//             .field("sample_rate", &self.sample_rate)
-//             .finish()
-//     }
-// }
+impl std::fmt::Debug for AudioFrame {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AudioFrame")
+            .field("samples len", &self.samples.len())
+            .field("channels", &self.channels)
+            .field("sample_rate", &self.sample_rate)
+            .field("pts", &self.pts)
+            .field("duration", &self.duration)
+            .finish()
+    }
+}
 
-// impl Iterator for AudioSource {
-//     type Item = f32;
+impl Iterator for AudioFrame {
+    type Item = f32;
 
-//     fn next(&mut self) -> Option<Self::Item> {
-//         self.next()
-//     }
-// }
+    fn next(&mut self) -> Option<Self::Item> {
+        self.samples.next()
+    }
+}
 
-// impl Source for AudioSource {
-//     fn current_frame_len(&self) -> Option<usize> {
-//         Some(self.samples.len())
-//     }
+impl Source for AudioFrame {
+    fn current_frame_len(&self) -> Option<usize> {
+        Some(self.samples.len())
+    }
 
-//     fn channels(&self) -> u16 {
-//         self.channels
-//     }
+    fn channels(&self) -> u16 {
+        self.channels
+    }
 
-//     fn sample_rate(&self) -> u32 {
-//         self.sample_rate
-//     }
+    fn sample_rate(&self) -> u32 {
+        self.sample_rate
+    }
 
-//     fn total_duration(&self) -> Option<std::time::Duration> {
-//         Some(self.duration)
-//     }
-// }
+    fn total_duration(&self) -> Option<std::time::Duration> {
+        Some(Duration::from_secs_f64(self.duration))
+    }
+}

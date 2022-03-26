@@ -13,5 +13,15 @@ pub fn load_fonts() -> FontDefinitions {
         .unwrap()
         .insert(0, "chinese".into());
 
+    log::info!("FontFamily::Proportional:");
+    for font in fonts
+        .families
+        .get(&FontFamily::Proportional)
+        .unwrap()
+        .iter()
+    {
+        log::info!("\t{}", font);
+    }
+
     fonts
 }

@@ -38,6 +38,8 @@ pub struct UiState {
 
     // System的FPS
     pub fps: f64,
+
+    pub password: String,
 }
 
 impl Default for UiState {
@@ -57,10 +59,11 @@ impl Default for UiState {
             video: VideoFrame::default(),
             video_texture: None,
             pause: false,
-            volume: 0.2,
+            volume: 1.0,
             mute: true,
             open_list: true,
             fps: 0.0,
+            password: String::new(),
         }
     }
 }

@@ -1,20 +1,17 @@
 use std::path::Path;
 
 use bevy::prelude::EventWriter;
-use bevy_egui::egui::{Align, Context, Label, Layout, Sense, SidePanel, Widget};
+use bevy_egui::egui::{
+    Align, Context, Label, Layout, Sense, SidePanel, TextEdit, TextStyle, Widget,
+};
 
 use crate::resources::event::PlayerEvent;
 
 use super::ui_state::UiState;
 
-pub struct VideoListView {
-    pub open: bool,
-}
+pub struct VideoListView {}
 
 impl VideoListView {
-    pub fn new() -> Self {
-        Self { open: true }
-    }
     pub fn show(
         ctx: &Context,
         ui_state: &mut UiState,
@@ -32,6 +29,18 @@ impl VideoListView {
                     Layout::top_down(Align::Min).with_cross_justify(true),
                     |ui| {
                         let play_list = ui_state.play_list.clone();
+                        ui.label("密码:    ");
+                        // ui.add(super::password::password(&mut self.password));
+                        // ui.add(egui::TextEdit::singleline(&mut self.password).password(true));
+                        let res = ui.add(
+                            TextEdit::singleline(&mut ui_state.password)
+                                .password(true)
+                                .font(TextStyle::Body),
+                        );
+                        if res.changed() {
+                            println!("password:{}", &ui_state.password);
+                        }
+
                         ui.label(format!("文件数: {}", play_list.len()));
 
                         for video in play_list.iter() {

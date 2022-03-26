@@ -1,5 +1,9 @@
 pub const APP_NAME: &str = "小小播放器";
 
+pub const AUDIO_FRAME_QUEUE_SIZE: usize = 15;
+pub const VIDEO_FRAME_QUEUE_SIZE: usize = 3;
+pub const PLAY_MIN_INTERVAL: f64 = 0.05;
+
 pub mod icons {
     pub const ICON_LOGO: &[u8] = include_bytes!("../misc/icons/logo.jpg");
     // pub const ICON_LIST: &[u8] = include_bytes!("../misc/icons/list.svg");

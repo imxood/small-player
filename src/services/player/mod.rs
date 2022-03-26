@@ -1,20 +1,21 @@
 use std::fmt::Debug;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
+
 use std::{collections::LinkedList, sync::atomic::Ordering};
 
-use crossbeam_channel::Sender;
-use parking_lot::Mutex;
-use rodio::buffer::SamplesBuffer;
+use crossbeam_channel::{SendError, Sender, TrySendError};
+use parking_lot::RwLock;
 use rsmpeg::avcodec::AVPacket;
 
 use crate::error::PlayerError;
 
-use self::audio::AudioDevice;
+use self::audio::{AudioDevice, AudioFrame};
 
 pub mod audio;
 pub mod decode;
 pub mod demux;
+pub mod play;
 pub mod stream;
 pub mod video;
 
@@ -57,6 +58,8 @@ pub struct VideoFrame {
     pub data: Vec<u8>,
     pub width: usize,
     pub height: usize,
+    pub pts: f64,
+    pub duration: f64,
 }
 
 impl ToString for VideoFrame {
@@ -75,12 +78,21 @@ impl Debug for VideoFrame {
         f.debug_struct("VideoFrame")
             .field("width", &self.width)
             .field("height", &self.height)
+            .field("pts", &self.pts)
+            .field("duration", &self.duration)
             .finish()
     }
 }
 
 impl VideoFrame {
-    pub fn from(raw_data: *const u8, width: usize, height: usize, line_size: usize) -> Self {
+    pub fn from(
+        raw_data: *const u8,
+        width: usize,
+        height: usize,
+        line_size: usize,
+        pts: f64,
+        duration: f64,
+    ) -> Self {
         let raw_data = unsafe { std::slice::from_raw_parts(raw_data, height * line_size) };
         let mut data: Vec<u8> = vec![0; width * height * 4];
         let data_slice = data.as_mut_slice();
@@ -97,6 +109,8 @@ impl VideoFrame {
             data,
             width,
             height,
+            pts,
+            duration,
         }
     }
 }
@@ -108,45 +122,56 @@ pub enum StreamType {
 
 #[derive(Clone)]
 pub struct PlayControl {
-    abort_request: Arc<AtomicBool>,
-    pause: Arc<AtomicBool>,
-    demux_finished: Arc<AtomicBool>,
-    audio_dev: Arc<Mutex<AudioDevice>>,
-    volume: Arc<Mutex<f32>>,
     state_tx: Sender<PlayState>,
+    abort_request: Arc<AtomicBool>,
+    demux_finished: Arc<AtomicBool>,
+    pause: Arc<AtomicBool>,
+    playing: Arc<AtomicBool>,
+    audio_dev: Arc<RwLock<AudioDevice>>,
+    volume: Arc<RwLock<f32>>,
+    audio_frame_tx: Sender<AudioFrame>,
+    video_frame_tx: Sender<VideoFrame>,
 }
 
 impl PlayControl {
-    pub fn new(audio_dev: Arc<Mutex<AudioDevice>>, state_tx: Sender<PlayState>) -> Self {
+    pub fn new(
+        audio_dev: Arc<RwLock<AudioDevice>>,
+        state_tx: Sender<PlayState>,
+        audio_frame_tx: Sender<AudioFrame>,
+        video_frame_tx: Sender<VideoFrame>,
+    ) -> Self {
         let abort_request = Arc::new(AtomicBool::new(false));
-        let pause = Arc::new(AtomicBool::new(false));
         let demux_finished = Arc::new(AtomicBool::new(false));
-        // 如果 解封装 视频解码 音频解码 都成功, 那么
+        let pause = Arc::new(AtomicBool::new(false));
+        let playing = Arc::new(AtomicBool::new(true));
         Self {
-            pause,
+            state_tx,
             abort_request,
             demux_finished,
+            pause,
+            playing,
             audio_dev,
-            volume: Arc::new(Mutex::new(1.0)),
-            state_tx,
+            audio_frame_tx,
+            video_frame_tx,
+            volume: Arc::new(RwLock::new(1.0)),
         }
     }
 
     pub fn set_mute(&self, mute: bool) {
-        self.audio_dev.lock().set_mute(mute);
+        self.audio_dev.write().set_mute(mute);
     }
 
     pub fn set_volume(&self, volume: f32) {
-        *self.volume.lock() = volume;
+        *self.volume.write() = volume;
     }
 
     pub fn volume(&self) -> f32 {
-        *self.volume.lock()
+        *self.volume.read()
     }
 
     pub fn set_abort_request(&self, abort_request: bool) {
         self.abort_request.store(abort_request, Ordering::Relaxed);
-        self.audio_dev.lock().stop();
+        self.audio_dev.write().stop();
         self.state_tx.send(PlayState::Stopped).ok();
     }
 
@@ -154,14 +179,22 @@ impl PlayControl {
         self.abort_request.load(Ordering::Relaxed)
     }
 
-    pub fn set_pause(&self, pause: bool) {
+    pub fn set_pause(&mut self, pause: bool) {
         self.pause.store(pause, Ordering::Relaxed);
-        self.audio_dev.lock().set_pause(pause);
+        self.audio_dev.write().set_pause(pause);
         self.state_tx.send(PlayState::Pausing(pause)).ok();
     }
 
     pub fn pause(&self) -> bool {
         self.pause.load(Ordering::Relaxed)
+    }
+
+    pub fn set_playing(&self, playing: bool) {
+        self.playing.store(playing, Ordering::Relaxed);
+    }
+
+    pub fn playing(&self) -> bool {
+        self.playing.load(Ordering::Relaxed)
     }
 
     pub fn set_demux_finished(&self, demux_finished: bool) {
@@ -173,11 +206,23 @@ impl PlayControl {
     }
 
     pub fn audio_default_config(&self) -> cpal::SupportedStreamConfig {
-        self.audio_dev.lock().default_config()
+        self.audio_dev.read().default_config()
     }
 
-    pub fn play_audio(&self, audio_source: SamplesBuffer<f32>) {
-        self.audio_dev.lock().play_source(audio_source);
+    pub fn send_audio(&self, audio: AudioFrame) -> Result<(), SendError<AudioFrame>> {
+        self.audio_frame_tx.send(audio)
+    }
+
+    pub fn send_video(&self, video: VideoFrame) -> Result<(), SendError<VideoFrame>> {
+        self.video_frame_tx.send(video)
+    }
+
+    pub fn send_state(&self, state: PlayState) -> Result<(), TrySendError<PlayState>> {
+        self.state_tx.try_send(state)
+    }
+
+    pub fn play_audio(&self, audio_source: AudioFrame) {
+        self.audio_dev.write().play_source(audio_source);
     }
 }
 

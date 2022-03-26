@@ -27,18 +27,20 @@
 
 #### ubuntu
 
-?? 忘了环境是怎么配的, 这么装应该可以
-
-sudo apt install ffmpeg
+./configure --prefix="/develop/programs/ffmpeg_build" --ld="clang" --enable-pic --disable-programs --disable-avdevice --disable-postproc --disable-network --disable-schannel --disable-sdl2 --disable-sndio
 
 ### 编译并运行
 
-    如果是 debug 版本, 在执行 解码后的Rgb数据 转 egui的 Color Image时 会特别慢, release版本会有优化
+```sh
+# 使用 nightly 编译
+rustup default nightly
 
-    cargo run --release
+# 如果是 debug 版本, 在执行 解码后的Rgb数据 转 egui的 Color Image时 会特别慢, release版本会有优化
 
-设置环境变量 "WGPU_BACKEND=.." 可以给wgpu选择不同的后端, 如: WGPU_BACKEND=gl, 使用opengl.
+cargo run --release
 
+# 设置环境变量 "WGPU_BACKEND=.." 可以给wgpu选择不同的后端, 如: WGPU_BACKEND=gl, 使用opengl.
+```
 ## 学习记录
 
 ### 音视频同步
@@ -85,3 +87,20 @@ ffprobe -show_packets -of json -i quliulang.mp3 > packets.json
 # 显示所有可用的封装
 ffmpeg -formats
 ```
+
+## 音频
+
+[PCM音频采样数据处理](https://blog.csdn.net/leixiaohua1020/article/details/50534316)
+
+## FFMPEG 内存管理
+
+参考 [FFmpeg视频播放的内存管理](https://www.jianshu.com/p/9f45d283d904)
+
+av_frame_alloc
+    只是给AVFrame分配了内存，它内部的buf还是空的，就相当于造了一个箱子，但箱子里是空的。
+
+av_frame_ref
+    对src的buf增加一个引用，即使用同一个数据，只是这个数据引用计数+1.av_frame_unref把自身对buf的引用释放掉，数据的引用计-1。
+
+av_frame_free
+    内部还是调用了unref,只是把传入的frame也置空

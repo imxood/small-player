@@ -1,21 +1,25 @@
 use std::{ffi::CString, sync::Arc};
 
-use crossbeam_channel::{Receiver, Sender};
-use parking_lot::Mutex;
+use crossbeam_channel::{bounded, Receiver, Sender};
+use parking_lot::{Mutex, RwLock};
 use rsmpeg::{
     avcodec::{AVCodecContext, AVPacket},
     avformat::AVFormatContextInput,
     ffi,
 };
 
-use crate::error::{PlayerError, Result};
+use crate::{
+    defines::{AUDIO_FRAME_QUEUE_SIZE, VIDEO_FRAME_QUEUE_SIZE},
+    error::{PlayerError, Result},
+};
 
 use super::{
-    audio::{audio_decode_thread, AudioDevice},
+    audio::{audio_decode_thread, AudioDevice, AudioFrame},
     demux::demux_thread,
+    play::play,
     stream::DecodeContext,
     video::video_decode_thread,
-    Command, PacketQueue, PlayControl, PlayState, StreamType,
+    Command, PacketQueue, PlayControl, PlayState, StreamType, VideoFrame,
 };
 
 pub fn decode(
@@ -23,9 +27,12 @@ pub fn decode(
     cmd_rx: Receiver<Command>,
     state_tx: Sender<PlayState>,
 ) -> Result<()> {
+    let (audio_frame_tx, audio_frame_queue) = bounded::<AudioFrame>(AUDIO_FRAME_QUEUE_SIZE);
+    let (video_frame_tx, video_frame_queue) = bounded::<VideoFrame>(VIDEO_FRAME_QUEUE_SIZE);
+
     let (ifmt_ctx, vdec, adec) = demux_init(filename)?;
 
-    let mut demux_ctx = DemuxContext::new(ifmt_ctx, state_tx);
+    let mut demux_ctx = DemuxContext::new(ifmt_ctx, state_tx, audio_frame_tx, video_frame_tx);
 
     let video_decode_ctx = demux_ctx.build_decode_ctx(vdec, StreamType::Video);
     let audio_decode_ctx = demux_ctx.build_decode_ctx(adec, StreamType::Audio);
@@ -52,6 +59,12 @@ pub fn decode(
             video_decode_thread(decode_ctx, time_base);
         });
     }
+
+    // 播放线程
+    let ctrl = demux_ctx.ctrl.clone();
+    std::thread::spawn(move || {
+        play(ctrl, audio_frame_queue, video_frame_queue);
+    });
 
     // 解封装线程
     std::thread::spawn(move || {
@@ -140,7 +153,12 @@ impl DemuxContext {
     pub const UNKNOWN_STREAM_IDX: i32 = -1;
     pub const MAX_MEM_SIZE: i32 = 16 * 1024 * 1024;
 
-    pub fn new(ifmt_ctx: AVFormatContextInput, state_tx: Sender<PlayState>) -> Self {
+    pub fn new(
+        ifmt_ctx: AVFormatContextInput,
+        state_tx: Sender<PlayState>,
+        audio_frame_tx: Sender<AudioFrame>,
+        video_frame_tx: Sender<VideoFrame>,
+    ) -> Self {
         let video_queue = Arc::new(Mutex::new(PacketQueue::new(
             Self::UNKNOWN_STREAM_IDX,
             Self::MAX_MEM_SIZE,
@@ -156,10 +174,10 @@ impl DemuxContext {
                 state_tx.send(PlayState::Error(e)).ok();
             })
             .unwrap();
-        let audio_dev = Arc::new(Mutex::new(audio_dev));
+        let audio_dev = Arc::new(RwLock::new(audio_dev));
 
         // 控制播放器的行为
-        let ctrl = PlayControl::new(audio_dev, state_tx);
+        let ctrl = PlayControl::new(audio_dev, state_tx, audio_frame_tx, video_frame_tx);
 
         Self {
             ifmt_ctx,
