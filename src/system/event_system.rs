@@ -7,21 +7,20 @@ use bevy::{
 };
 
 use crate::{
-    resources::event::{PlayEvent, PlayerEvent},
-    ui::ui_state::UiState,
+    resources::event::PlayerEvent, services::player::player::Player, ui::ui_state::UiState,
 };
 
 use super::GameState;
 
-pub fn update_player_event(
+pub fn update_event(
     winit_windows: Res<WinitWindows>,
     diagnostics: Res<Diagnostics>,
     mut ui_state: ResMut<UiState>,
-    mut windows: ResMut<Windows>,
-    mut state: ResMut<State<GameState>>,
+    mut game_state: ResMut<State<GameState>>,
+    mut player: ResMut<Player>,
     mut player_evt: EventReader<PlayerEvent>,
+    mut windows: ResMut<Windows>,
     mut exit: EventWriter<AppExit>,
-    _play_evt: EventWriter<PlayEvent>,
 ) {
     if let Some(fps_diagnostic) = diagnostics.get(FrameTimeDiagnosticsPlugin::FPS) {
         if let Some(fps_avg) = fps_diagnostic.average() {
@@ -64,11 +63,14 @@ pub fn update_player_event(
                     window.drag_window().ok();
                 }
             }
+            _ => {}
+        }
 
+        match event {
             /*
                 播放控制
             */
-            PlayerEvent::OpenFolder => {
+            PlayerEvent::OpenFile => {
                 if let Some(files) = rfd::FileDialog::new()
                     .add_filter("video", &["mp4"])
                     .pick_files()
@@ -80,18 +82,49 @@ pub fn update_player_event(
                     }
                 }
             }
-            PlayerEvent::Start(filename) => {
-                log::info!("开始播放 {}", filename);
-                if state.set(GameState::Playing).is_err() {
-                    state.set(GameState::Restart).unwrap();
-                }
-                // let play_service = world.iet_resource::<PlayService>();
-            }
-            PlayerEvent::Stop => {
+            PlayerEvent::Terminate => {
                 log::info!("停止播放");
-                state.set(GameState::Stop).ok();
+                game_state.set(GameState::Terminal).ok();
+            }
+            PlayerEvent::Pause(pause) => {
+                player.set_pause(*pause);
+                continue;
+            }
+            PlayerEvent::Mute(mute) => {
+                player.set_mute(*mute);
+                continue;
+            }
+            PlayerEvent::Volume(volume) => {
+                player.set_volume(*volume);
+                continue;
             }
             _ => {}
+        }
+
+        // 根据循环模式, 和 当前选择文件 或者 未选择文件 的不同情况, 确定要播放的文件
+        let offset = match event {
+            PlayerEvent::Previous => -1,
+            PlayerEvent::Play => 0,
+            PlayerEvent::Next => 1,
+            _ => continue,
+        };
+
+        // 播放文件
+        if let Some(file) = ui_state.current_filename(offset) {
+            match player.play(file.clone()) {
+                Ok(_) => {
+                    player.set_volume(ui_state.volume);
+
+                    log::info!("开始播放 {}", file);
+                    
+                    ui_state.enter_playing();
+                    game_state.set(GameState::Playing).ok();
+                    continue;
+                }
+                Err(e) => {
+                    log::info!("播放失败, E: {}", e.to_string());
+                }
+            }
         }
     }
 }

@@ -1,73 +1,54 @@
 use bevy::prelude::*;
 
 use crate::{
-    resources::event::PlayEvent,
-    services::{play_service::PlayService, player::PlayState},
+    resources::event::PlayerEvent,
+    services::player::{player::Player, PlayState},
     system::GameState,
     ui::ui_state::UiState,
 };
 
-pub fn start_player(
-    mut ui_state: ResMut<UiState>,
-    mut commands: Commands,
-    mut state: ResMut<State<GameState>>,
-) {
-    ui_state.state = PlayState::Start;
-    let choose_file = ui_state.choose_file.take();
-    if let Some(filename) = choose_file {
-        match PlayService::create(filename) {
-            Ok(service) => {
-                service.set_volume(ui_state.volume);
-                commands.insert_resource(service);
-                return;
-            }
-            Err(e) => {
-                log::info!("播放失败, E: {}", e.to_string());
-            }
-        }
-    } else {
-        log::info!("未选中文件, 无法播放");
-    }
-    state.set(GameState::Stop).ok();
+pub fn start_player(mut ui_state: ResMut<UiState>) {
+    ui_state.enter_playing();
 }
 
-pub fn stop_player(mut ui_state: ResMut<UiState>, mut commands: Commands) {
-    commands.remove_resource::<PlayService>();
-    ui_state.state = PlayState::Stopped;
-    log::info!("service - state: {:?}", &ui_state.state);
+pub fn stop_player(mut ui_state: ResMut<UiState>, player: ResMut<Player>) {
+    ui_state.exit_playing();
+    player.set_play_finished();
+    // log::info!("service - state: {:?}", &ui_state.play_state);
 }
 
 pub fn update_player(
     mut ui_state: ResMut<UiState>,
-    mut play_service: ResMut<PlayService>,
-    mut state: ResMut<State<GameState>>,
-    mut play_evt: EventReader<PlayEvent>,
+    mut game_state: ResMut<State<GameState>>,
+    mut player: ResMut<Player>,
+    mut play_evt_sender: EventWriter<PlayerEvent>,
 ) {
-    for event in play_evt.iter() {
-        match event {
-            PlayEvent::Pause(pause) => {
-                play_service.set_pause(*pause);
-            }
-            PlayEvent::Mute(mute) => {
-                play_service.set_mute(*mute);
-            }
-            PlayEvent::Volume(volume) => {
-                play_service.set_volume(*volume);
-            }
-            _ => {}
-        }
-    }
-
-    if let Some(state) = play_service.try_recv_state() {
+    // 更新 状态
+    if let Some(state) = player.try_recv_state() {
         // log::info!("service - state: {:?}", &state);
         match state {
             PlayState::Pausing(pause) => {
                 ui_state.pause = pause;
             }
-            _ => ui_state.state = state,
+            PlayState::Terminated => {
+                game_state.set(GameState::Terminal).ok();
+            }
+            PlayState::Video(video) => {
+                ui_state.video = Some(video);
+                // game_state.set(GameState::Terminal).ok();
+            }
+            _ => {
+                // ui_state.play_state = state
+            }
         }
-    } else if play_service.is_stopped() {
-        state.set(GameState::Stop).ok();
+    }
+    // 如果一个文件已经播放完毕
+    else if player.play_finished() {
+        if ui_state.looping {
+            play_evt_sender.send(PlayerEvent::Next);
+        } else {
+            game_state.set(GameState::Terminal).ok();
+        }
     }
 }
 

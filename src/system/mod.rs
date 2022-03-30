@@ -6,6 +6,6 @@ pub mod play_system;
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum GameState {
     Playing,
-    Stop,
+    Terminal,
     Restart,
 }

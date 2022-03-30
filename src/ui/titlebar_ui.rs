@@ -46,9 +46,9 @@ impl Titlebar {
 
             ui.with_layout(egui::Layout::left_to_right(), |ui| {
                 ui.menu_button("选项", |ui| {
-                    if ui.button("打开目录").clicked() {
+                    if ui.button("打开文件").clicked() {
                         ui.close_menu();
-                        player_event.send(PlayerEvent::OpenFolder);
+                        player_event.send(PlayerEvent::OpenFile);
                     }
                 });
                 ui.menu_button("样式", |ui| {

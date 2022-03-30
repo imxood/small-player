@@ -1,23 +1,14 @@
-use bevy_egui::egui::{
-    vec2, ColorImage, Context, InnerResponse, Sense, Ui,
-};
-
-
-use crate::{services::player::PlayState};
+use bevy_egui::egui::{vec2, ColorImage, Context, InnerResponse, Sense, Ui};
 
 use super::ui_state::UiState;
 
 pub struct PlayContentView {}
 
 impl PlayContentView {
-    pub fn new() -> Self {
-        Self {}
-    }
-
     pub fn show(ctx: &Context, ui: &mut Ui, ui_state: &mut UiState) {
         ui.set_style(ui_state.theme.blue_video_content_style());
         // 视频状态
-        if let PlayState::Video(video) = &ui_state.state {
+        if let Some(video) = &ui_state.video {
             // 居中
             let InnerResponse { inner: _, response } = ui.vertical_centered_justified(|ui| {
                 let width = video.width as f32;
@@ -52,8 +43,8 @@ impl PlayContentView {
                     ui.close_menu();
                 }
             });
-        } else if let PlayState::Stopped = &ui_state.state {
-            ui.heading("Stopped");
+        } else if !ui_state.playing {
+            ui.heading("Terminated");
         }
     }
 }

@@ -4,17 +4,28 @@ use std::vec::IntoIter;
 
 use cpal::traits::HostTrait;
 use cpal::SupportedStreamConfig;
+use crossbeam_channel::Receiver;
 use rodio::{DeviceTrait, OutputStream, Sample, Sink, Source};
 use rsmpeg::avfilter::AVFilterGraph;
+use rsmpeg::avutil::AVFrame;
 
+use crate::defines::PLAY_MIN_INTERVAL;
 use crate::error::{PlayerError, Result};
 use crate::services::player::stream::{decode_frame, DecodeContext};
+use crate::services::player::PlayControl;
 
-pub fn audio_decode_thread(mut decode_ctx: DecodeContext) {
+use super::PlayFrame;
+
+pub fn audio_decode_thread(play_ctrl: PlayControl, mut decode_ctx: DecodeContext) {
     let mut audio_graph = None;
-
+    let mut raw_frame = AVFrame::new();
     loop {
-        let source = fetch_audio_source(&mut decode_ctx, &mut audio_graph);
+        let source = fetch_audio_source(
+            &mut decode_ctx,
+            &play_ctrl,
+            &mut audio_graph,
+            &mut raw_frame,
+        );
         let audio = match source {
             Ok(None) => break,
             Ok(Some(source)) => source,
@@ -23,42 +34,70 @@ pub fn audio_decode_thread(mut decode_ctx: DecodeContext) {
                 break;
             }
         };
-        if let Err(_) = decode_ctx.send_audio(audio) {
+        if let Err(_) = play_ctrl.send_audio(audio) {
             log::info!("audio thread disconnected");
             break;
         }
     }
-    log::info!("audio 解码线程退出");
+    log::info!("音频解码线程退出");
+}
+
+pub fn audio_play_thread(
+    play_ctrl: PlayControl,
+    audio_frame_queue: Receiver<AudioFrame>,
+) -> Result<()> {
+    let mut empty_count = 0;
+
+    loop {
+        if play_ctrl.abort_request() {
+            break;
+        }
+
+        if play_ctrl.pause() {
+            play_ctrl.wait_notify_in_pause();
+        }
+
+        if let Ok(frame) = audio_frame_queue.try_recv() {
+            play_ctrl.play_audio(frame)?;
+            empty_count = 0;
+            continue;
+        }
+
+        empty_count += 1;
+        if empty_count == 10 {
+            play_ctrl.set_audio_finished(true);
+            break;
+        }
+        spin_sleep::sleep(PLAY_MIN_INTERVAL);
+    }
+    log::info!("音频播放线程退出");
+    Ok(())
 }
 
 pub fn fetch_audio_source(
     decode_ctx: &mut DecodeContext,
+    play_ctrl: &PlayControl,
     audio_graph: &mut Option<AVFilterGraph>,
+    frame: &mut AVFrame,
 ) -> Result<Option<AudioFrame>> {
-    let raw_frame = match decode_frame(decode_ctx) {
-        Ok(None) => {
-            log::info!("audio decode exited");
+    match decode_frame(play_ctrl, decode_ctx, frame) {
+        Ok(false) => {
             return Ok(None);
         }
-        Ok(Some(frame)) => frame,
         Err(e) => {
             return Err(PlayerError::Error(e.to_string()));
         }
+        Ok(true) => {}
     };
 
-    log::debug!(
-        "audio queue mem_size: {} MByte",
-        decode_ctx.queue_mem_size() as f32 / 1000000.0
-    );
-
     if audio_graph.is_none() {
-        let default_config = decode_ctx.audio_default_config();
+        let default_config = play_ctrl.audio_default_config();
         *audio_graph = Some(
             audio_graph_parse(
-                raw_frame.sample_rate,
-                raw_frame.format,
-                raw_frame.channel_layout,
-                raw_frame.channels,
+                frame.sample_rate,
+                frame.format,
+                frame.channel_layout,
+                frame.channels,
                 default_config.sample_rate().0,
             )
             .expect("Error while audio_graph_parse"),
@@ -70,7 +109,7 @@ pub fn fetch_audio_source(
     graph
         .get_filter(cstr::cstr!("abuffer@audio0"))
         .expect("get abuffer@audio0 failed")
-        .buffersrc_add_frame(Some(raw_frame), None)
+        .buffersrc_add_frame(Some(frame), None)
         .expect("Error while feeding the filtergraph");
 
     let ctx = &mut graph
@@ -81,16 +120,18 @@ pub fn fetch_audio_source(
         .buffersink_get_frame(None)
         .expect("Get frame from buffer sink failed");
 
-    let data_len = frame.nb_samples as usize * frame.channels as usize;
-
     // 音频的时间基 就是一个采样的时间, 即 采样率的倒数
-    let time_base = 1.0 / frame.sample_rate as f64;
+    // pts = frame.pts * 时间基 = frame.pts / frame.sample_rate
+    let pts = frame.pts as f64 / frame.sample_rate as f64;
+    let duration = frame.nb_samples as f64 / frame.sample_rate as f64;
 
-    let pts = time_base * frame.pts as f64;
-    let duration = time_base * data_len as f64;
-
-    let volume = decode_ctx.volume();
-    let samples = unsafe { std::slice::from_raw_parts(frame.data[0] as *const f32, data_len) };
+    let volume = play_ctrl.volume();
+    let samples = unsafe {
+        std::slice::from_raw_parts(
+            frame.data[0] as *const f32,
+            (frame.nb_samples * frame.channels) as usize,
+        )
+    };
     let samples: Vec<f32> = samples.iter().map(|s| s * volume).collect();
 
     let source = AudioFrame::new(
@@ -100,7 +141,6 @@ pub fn fetch_audio_source(
         pts,
         duration,
     );
-
     Ok(Some(source))
 }
 
@@ -144,6 +184,86 @@ pub fn audio_graph_parse(
     filter_graph.config()?;
 
     Ok(filter_graph)
+}
+
+#[derive(Clone)]
+pub struct AudioFrame {
+    pub samples: IntoIter<f32>,
+    pub channels: u16,
+    pub sample_rate: u32,
+    pub pts: f64,
+    pub duration: f64,
+}
+
+impl AudioFrame {
+    pub fn new(
+        samples: Vec<f32>,
+        channels: u16,
+        sample_rate: u32,
+        pts: f64,
+        duration: f64,
+    ) -> Self {
+        Self {
+            samples: samples.into_iter(),
+            channels,
+            sample_rate,
+            pts,
+            duration,
+        }
+    }
+}
+
+impl PlayFrame for AudioFrame {
+    fn pts(&self) -> f64 {
+        self.pts
+    }
+
+    fn duration(&self) -> f64 {
+        self.duration
+    }
+
+    fn mem_size(&self) -> usize {
+        // std::mem::size_of::<Self>() +
+        std::mem::size_of::<f32>() * self.samples.len()
+    }
+}
+
+impl std::fmt::Debug for AudioFrame {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AudioFrame")
+            // .field("samples len", &self.samples.len())
+            // .field("channels", &self.channels)
+            // .field("sample_rate", &self.sample_rate)
+            .field("pts", &self.pts)
+            .field("duration", &self.duration)
+            .finish()
+    }
+}
+
+impl Iterator for AudioFrame {
+    type Item = f32;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.samples.next()
+    }
+}
+
+impl Source for AudioFrame {
+    fn current_frame_len(&self) -> Option<usize> {
+        Some(self.samples.len())
+    }
+
+    fn channels(&self) -> u16 {
+        self.channels
+    }
+
+    fn sample_rate(&self) -> u32 {
+        self.sample_rate
+    }
+
+    fn total_duration(&self) -> Option<std::time::Duration> {
+        Some(Duration::from_secs_f64(self.duration))
+    }
 }
 
 pub struct AudioDevice {
@@ -221,68 +341,3 @@ impl AudioDevice {
 
 unsafe impl Send for AudioDevice {}
 unsafe impl Sync for AudioDevice {}
-
-#[derive(Clone)]
-pub struct AudioFrame {
-    pub samples: IntoIter<f32>,
-    pub channels: u16,
-    pub sample_rate: u32,
-    pub pts: f64,
-    pub duration: f64,
-}
-
-impl AudioFrame {
-    pub fn new(
-        samples: Vec<f32>,
-        channels: u16,
-        sample_rate: u32,
-        pts: f64,
-        duration: f64,
-    ) -> Self {
-        Self {
-            samples: samples.into_iter(),
-            channels,
-            sample_rate,
-            pts,
-            duration,
-        }
-    }
-}
-
-impl std::fmt::Debug for AudioFrame {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("AudioFrame")
-            .field("samples len", &self.samples.len())
-            .field("channels", &self.channels)
-            .field("sample_rate", &self.sample_rate)
-            .field("pts", &self.pts)
-            .field("duration", &self.duration)
-            .finish()
-    }
-}
-
-impl Iterator for AudioFrame {
-    type Item = f32;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.samples.next()
-    }
-}
-
-impl Source for AudioFrame {
-    fn current_frame_len(&self) -> Option<usize> {
-        Some(self.samples.len())
-    }
-
-    fn channels(&self) -> u16 {
-        self.channels
-    }
-
-    fn sample_rate(&self) -> u32 {
-        self.sample_rate
-    }
-
-    fn total_duration(&self) -> Option<std::time::Duration> {
-        Some(Duration::from_secs_f64(self.duration))
-    }
-}

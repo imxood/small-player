@@ -8,16 +8,16 @@ edition = "2021"
 [dependencies]
 bevy = { version = "0.6", default-features = false }
 bevy_egui = { path = "../bevy_egui", default-features = false }
-cpal = "0.13.5"
-crossbeam-channel = "0.5.2"
-cstr = "0.2.10"
 egui_extras = { version = "0.17.0", features = ["image"] }
 image = "0.24.1"
+cstr = "0.2.10"
+rsmpeg = { path = "../rsmpeg" }
+cpal = "0.13.5"
+rodio = { version = "0.15.0", default-features = false }
+crossbeam-channel = "0.5.2"
 log = "0.4.14"
 parking_lot = "0.12.0"
 rfd = "0.8.1"
-rodio = { version = "0.15.0", default-features = false }
-rsmpeg = { path = "../rsmpeg" }
 spin_sleep = "1.1.0"
 thiserror = "1.0.30"
 winit = "0.26.1"

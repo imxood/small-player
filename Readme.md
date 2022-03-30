@@ -4,7 +4,14 @@
 
 如果喜欢这个项目, 请 star 或 fork.
 
-![](docs/Readme/2022-03-15-00-18-09.png)
+![](docs/Readme/2022-03-30-22-24-17.png)
+
+当前已实现:
+视频文件的 播放/暂停/停止/上一首/下一首/音量控制
+
+存在问题:
+依然有一些内存无法释放, 应该是FFMPEG的内存, 原因暂时不明
+启动后, 没有播放时内存是31Mb, 每播放一个视频, 内存会增加一点, 循环播放3个视频 平均每个视频时长1分钟, 最高清为1080P, 播放2个小时后会占用大概592Mb内存
 
 ## 编译环境
 
@@ -27,7 +34,21 @@
 
 #### ubuntu
 
+```sh
+git clone https://github.com/ffmpeg/ffmpeg.git
+
+cd ffmpeg
+
+make clean
+
 ./configure --prefix="/develop/programs/ffmpeg_build" --ld="clang" --enable-pic --disable-programs --disable-avdevice --disable-postproc --disable-network --disable-schannel --disable-sdl2 --disable-sndio
+
+make -j
+make install
+
+# 编译 ffmpeg 的例子
+make examples -j
+```
 
 ### 编译并运行
 
@@ -45,7 +66,9 @@ cargo run --release
 
 ### 音视频同步
 
-参考: [音视频同步](https://www.cnblogs.com/leisure_chn/p/10307089.html)
+非常重要的参考:
+* [音视频同步](https://www.cnblogs.com/leisure_chn/p/10307089.html)
+* [播放器技术分享（3）：音画同步](https://zhuanlan.zhihu.com/p/51924640)
 
 对于 一个44.1KHz的AAC音频流 (一秒声音中有44.1K个数据点), 每个声道可能包含1024个采样点, 即: 一帧声音中 需要采样 1024个数据, 那这一帧的时间就是
 平均每个数据点的时间 乘以 采样数, 在乘以1000, 得到一帧音频数据的毫秒时间, 即: 1/44.1K * 1024 * 1000ms ≈ 23.22ms

@@ -1,8 +1,20 @@
+use std::time::Duration;
+
 pub const APP_NAME: &str = "小小播放器";
 
-pub const AUDIO_FRAME_QUEUE_SIZE: usize = 15;
-pub const VIDEO_FRAME_QUEUE_SIZE: usize = 3;
-pub const PLAY_MIN_INTERVAL: f64 = 0.05;
+pub const AUDIO_FRAME_QUEUE_SIZE: usize = 5;
+pub const VIDEO_FRAME_QUEUE_SIZE: usize = 1;
+
+pub const PLAY_MIN_INTERVAL: Duration = Duration::from_secs_f64(0.05);
+
+/*
+    音画同步阈值范围 参考: https://zhuanlan.zhihu.com/p/51924640
+*/
+
+/// 视频同步阈值最小 (视频落后于音频的最小时间)
+pub const VIDEO_SYNC_THRESHOLD_MIN: f64 = -0.1;
+/// 视频同步阈值最大 (视频领先于音频的最大时间)
+pub const VIDEO_SYNC_THRESHOLD_MAX: f64 = 0.025;
 
 pub mod icons {
     pub const ICON_LOGO: &[u8] = include_bytes!("../misc/icons/logo.jpg");

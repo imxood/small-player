@@ -1,5 +1,3 @@
-use crossbeam_channel::SendError;
-use crossbeam_channel::TrySendError;
 use parking_lot::Mutex;
 use rsmpeg::avcodec::AVCodecContext;
 use rsmpeg::avcodec::AVPacket;
@@ -9,64 +7,21 @@ use rsmpeg::ffi::{self};
 use std::sync::Arc;
 use std::time::Duration;
 
-
-use super::audio::AudioFrame;
-use super::PlayState;
 use super::{PacketQueue, PlayControl};
 use crate::error::{PlayerError, Result};
 
 pub struct DecodeContext {
-    pub ctrl: PlayControl,
     dec_ctx: AVCodecContext,
     queue: Arc<Mutex<PacketQueue>>,
 }
 
 impl DecodeContext {
-    pub fn new(dec_ctx: AVCodecContext, ctrl: PlayControl, queue: Arc<Mutex<PacketQueue>>) -> Self {
-        Self {
-            dec_ctx,
-            ctrl,
-            queue,
-        }
-    }
-
-    pub fn send_audio(
-        &self,
-        audio_source: AudioFrame,
-    ) -> std::result::Result<(), SendError<AudioFrame>> {
-        self.ctrl.send_audio(audio_source)
-    }
-
-    pub fn send_state(
-        &self,
-        state: PlayState,
-    ) -> core::result::Result<(), TrySendError<PlayState>> {
-        self.ctrl.state_tx.try_send(state)
-    }
-
-    pub fn audio_default_config(&self) -> cpal::SupportedStreamConfig {
-        self.ctrl.audio_default_config()
-    }
-
-    pub fn volume(&self) -> f32 {
-        self.ctrl.volume()
-    }
-
-    pub fn cancel(&self) -> bool {
-        self.ctrl.abort_request()
-    }
-
-    // 已暂停
-    pub fn pause(&self) -> bool {
-        self.ctrl.pause()
+    pub fn new(dec_ctx: AVCodecContext, queue: Arc<Mutex<PacketQueue>>) -> Self {
+        Self { dec_ctx, queue }
     }
 
     pub fn stream_idx(&self) -> i32 {
         self.queue.lock().stream_idx()
-    }
-
-    pub fn queue_mem_size(&self) -> i32 {
-        self.queue.lock().mem_size()
     }
 
     pub fn queue_pop(&self) -> Option<AVPacket> {
@@ -86,32 +41,35 @@ impl DecodeContext {
     }
 }
 
-pub fn decode_frame(decode_ctx: &mut DecodeContext) -> Result<Option<AVFrame>> {
+pub fn decode_frame(
+    play_ctrl: &PlayControl,
+    decode_ctx: &mut DecodeContext,
+    frame: &mut AVFrame,
+) -> Result<bool> {
     let mut retry_send_packet;
-
     loop {
         retry_send_packet = false;
         // 先尝试 接收一帧, 后面再判断是否需要退出, 原因是为了避免最后一帧数据丢失
-        match decode_ctx.dec_ctx_mut().receive_frame() {
-            Ok(frame) => {
-                return Ok(Some(frame));
+        match decode_ctx.dec_ctx_mut().receive_frame(frame) {
+            Ok(_) => {
+                return Ok(true);
             }
             Err(RsmpegError::DecoderDrainError) => {
                 retry_send_packet = true;
             }
             Err(RsmpegError::DecoderFlushedError) => unsafe {
                 ffi::avcodec_flush_buffers(decode_ctx.dec_ctx().as_mut_ptr());
-                return Ok(None);
+                return Ok(false);
             },
             Err(e) => return Err(PlayerError::Error(e.to_string())),
         }
 
         loop {
-            if decode_ctx.cancel() {
-                return Ok(None);
+            if play_ctrl.abort_request() {
+                return Ok(false);
             }
             // 已暂停 / Packet中没有数据
-            if !decode_ctx.pause() || !decode_ctx.queue_is_empty() {
+            if !play_ctrl.pause() || !decode_ctx.queue_is_empty() {
                 break;
             }
             spin_sleep::sleep(Duration::from_millis(50));

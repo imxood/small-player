@@ -1,39 +1,60 @@
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
+
 use crossbeam_channel::{bounded, Receiver, Sender, TryRecvError};
 
 use crate::error::Result;
 
-use super::player::{decode::decode, Command, PlayState};
+use super::{play::play, Command, PlayState};
 
-pub struct PlayService {
+pub struct Player {
     cmd_tx: Sender<Command>,
     state_rx: Receiver<PlayState>,
-    stopped: bool,
+    abort_request: Arc<AtomicBool>,
 }
 
-impl Drop for PlayService {
+impl Drop for Player {
     fn drop(&mut self) {
-        log::info!("PlayService Dropped");
+        log::info!("Player Dropped");
     }
 }
 
-unsafe impl Send for PlayService {}
-unsafe impl Sync for PlayService {}
+unsafe impl Send for Player {}
+unsafe impl Sync for Player {}
 
-impl PlayService {
-    pub fn create(filename: String) -> Result<Self> {
-        let (cmd_tx, cmd_rx) = bounded::<Command>(2);
-        let (state_tx, state_rx) = bounded::<PlayState>(2);
-        decode(filename, cmd_rx, state_tx)?;
-        let this = Self {
+impl Default for Player {
+    fn default() -> Self {
+        let (cmd_tx, _cmd_rx) = bounded::<Command>(2);
+        let (_state_tx, state_rx) = bounded::<PlayState>(1);
+        let abort_request = Arc::new(AtomicBool::new(false));
+        Self {
             cmd_tx,
             state_rx,
-            stopped: false,
-        };
-        Ok(this)
+            abort_request,
+        }
+    }
+}
+impl Player {
+    pub fn play(&mut self, file: impl Into<String>) -> Result<()> {
+        let (cmd_tx, cmd_rx) = bounded::<Command>(2);
+        let (state_tx, state_rx) = bounded::<PlayState>(1);
+
+        self.cmd_tx = cmd_tx;
+        self.state_rx = state_rx;
+        self.abort_request = Arc::new(AtomicBool::new(false));
+
+        play(file.into(), cmd_rx, state_tx, self.abort_request.clone())?;
+        Ok(())
     }
 
-    pub fn is_stopped(&self) -> bool {
-        self.stopped
+    pub fn play_finished(&self) -> bool {
+        self.abort_request.load(Ordering::Relaxed)
+    }
+
+    pub fn set_play_finished(&self) {
+        self.abort_request.store(true, Ordering::Relaxed);
     }
 
     pub fn set_pause(&self, pause: bool) {
@@ -66,7 +87,8 @@ impl PlayService {
             Ok(state) => Some(state),
             Err(TryRecvError::Empty) => None,
             Err(TryRecvError::Disconnected) => {
-                self.stopped = true;
+                log::info!("player state Disconnected");
+                // self.set_abort_request(true);
                 None
             }
         }
