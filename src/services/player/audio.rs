@@ -7,7 +7,6 @@ use cpal::SupportedStreamConfig;
 use crossbeam_channel::Receiver;
 use rodio::{DeviceTrait, OutputStream, Sample, Sink, Source};
 use rsmpeg::avfilter::AVFilterGraph;
-use rsmpeg::avutil::AVFrame;
 
 use crate::defines::PLAY_MIN_INTERVAL;
 use crate::error::{PlayerError, Result};
@@ -18,14 +17,8 @@ use super::PlayFrame;
 
 pub fn audio_decode_thread(play_ctrl: PlayControl, mut decode_ctx: DecodeContext) {
     let mut audio_graph = None;
-    let mut raw_frame = AVFrame::new();
     loop {
-        let source = fetch_audio_source(
-            &mut decode_ctx,
-            &play_ctrl,
-            &mut audio_graph,
-            &mut raw_frame,
-        );
+        let source = fetch_audio_source(&mut decode_ctx, &play_ctrl, &mut audio_graph);
         let audio = match source {
             Ok(None) => break,
             Ok(Some(source)) => source,
@@ -78,16 +71,15 @@ pub fn fetch_audio_source(
     decode_ctx: &mut DecodeContext,
     play_ctrl: &PlayControl,
     audio_graph: &mut Option<AVFilterGraph>,
-    frame: &mut AVFrame,
 ) -> Result<Option<AudioFrame>> {
-    match decode_frame(play_ctrl, decode_ctx, frame) {
-        Ok(false) => {
+    let frame = match decode_frame(play_ctrl, decode_ctx) {
+        Ok(None) => {
             return Ok(None);
         }
+        Ok(Some(frame)) => frame,
         Err(e) => {
             return Err(PlayerError::Error(e.to_string()));
         }
-        Ok(true) => {}
     };
 
     if audio_graph.is_none() {

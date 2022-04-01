@@ -19,18 +19,22 @@
 
 #### windows 10
 
-需要安装 vcpkg:
+```
+# 安装 vcpkg:
+# 打开 powershell, 执行:
 
-    打开 powershell, 执行:
+git clone https://github.com/Microsoft/vcpkg.git
 
-    git clone https://github.com/Microsoft/vcpkg.git
-    cd vcpkg
-    .\bootstrap-vcpkg.bat -disableMetrics
-    .\vcpkg.exe integrate install
+cd vcpkg
 
-使用 vcpkg 编译 (我开了代理, 总共编译大概36分钟):
+.\bootstrap-vcpkg.bat -disableMetrics
+.\vcpkg.exe integrate install
 
-    .\vcpkg.exe install ffmpeg[ffmpeg,ffplay,ffprobe,x265,avcodec,avdevice,fdk-aac] --triplet x64-windows-static-md --recurse
+# 使用 vcpkg 编译 (我开了代理, 总共编译大概36分钟):
+.\vcpkg.exe install ffmpeg[ffmpeg,ffplay,ffprobe,x265,avcodec,avdevice,fdk-aac] --triplet x64-windows-static-md --recurse
+```
+
+可能需要设置把 vcpkg.exe 和 cmake.exe 的路径设置到环境变量
 
 #### ubuntu
 
@@ -48,6 +52,11 @@ make install
 
 # 编译 ffmpeg 的例子
 make examples -j
+```
+
+```
+# 记得设置环境变量, 编译ffi时需要
+export FFMPEG_PKG_CONFIG_PATH=/develop/programs/ffmpeg_build/lib/pkgconfig
 ```
 
 ### 编译并运行

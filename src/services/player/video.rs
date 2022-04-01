@@ -40,9 +40,6 @@ pub fn video_decode_thread(
     })
     .unwrap();
 
-    // 用于从包中接收的帧数据
-    let mut raw_frame = AVFrame::new();
-
     // 用于把 接收到的帧数据 转换成 特定格式的帧数据
     let mut rgb_frame = AVFrame::new();
     rgb_frame.set_format(ffi::AVPixelFormat_AV_PIX_FMT_RGBA);
@@ -60,17 +57,17 @@ pub fn video_decode_thread(
 
     loop {
         // 解码视频包, 获取视频帧
-        let ret = decode_frame(&play_ctrl, &mut decode_ctx, &mut raw_frame);
+        let ret = decode_frame(&play_ctrl, &mut decode_ctx);
 
-        match ret {
-            Ok(false) => {
+        let raw_frame = match ret {
+            Ok(Some(frame)) => frame,
+            Ok(None) => {
                 break;
             }
             Err(e) => {
                 log::error!("E: {}", e.to_string());
                 break;
             }
-            Ok(true) => {}
         };
 
         // 视频帧 格式转换

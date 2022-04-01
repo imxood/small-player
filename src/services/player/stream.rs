@@ -44,29 +44,28 @@ impl DecodeContext {
 pub fn decode_frame(
     play_ctrl: &PlayControl,
     decode_ctx: &mut DecodeContext,
-    frame: &mut AVFrame,
-) -> Result<bool> {
+) -> Result<Option<AVFrame>> {
     let mut retry_send_packet;
     loop {
         retry_send_packet = false;
         // 先尝试 接收一帧, 后面再判断是否需要退出, 原因是为了避免最后一帧数据丢失
-        match decode_ctx.dec_ctx_mut().receive_frame(frame) {
-            Ok(_) => {
-                return Ok(true);
+        match decode_ctx.dec_ctx_mut().receive_frame() {
+            Ok(frame) => {
+                return Ok(Some(frame));
             }
             Err(RsmpegError::DecoderDrainError) => {
                 retry_send_packet = true;
             }
             Err(RsmpegError::DecoderFlushedError) => unsafe {
                 ffi::avcodec_flush_buffers(decode_ctx.dec_ctx().as_mut_ptr());
-                return Ok(false);
+                return Ok(None);
             },
             Err(e) => return Err(PlayerError::Error(e.to_string())),
         }
 
         loop {
             if play_ctrl.abort_request() {
-                return Ok(false);
+                return Ok(None);
             }
             // 已暂停 / Packet中没有数据
             if !play_ctrl.pause() || !decode_ctx.queue_is_empty() {
