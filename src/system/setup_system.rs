@@ -28,7 +28,7 @@ pub fn egui_setup(
 }
 
 /// 设置应用图标
-pub fn icon_setup(windows: Res<WinitWindows>) {
+pub fn icon_setup(windows: NonSend<WinitWindows>) {
     let primary = windows.get_window(WindowId::primary()).unwrap();
 
     let (icon_rgba, icon_width, icon_height) = {

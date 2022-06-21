@@ -13,7 +13,7 @@ use crate::{
 use super::GameState;
 
 pub fn update_event(
-    winit_windows: Res<WinitWindows>,
+    winit_windows: NonSend<WinitWindows>,
     diagnostics: Res<Diagnostics>,
     mut ui_state: ResMut<UiState>,
     mut game_state: ResMut<State<GameState>>,
@@ -116,7 +116,7 @@ pub fn update_event(
                     player.set_volume(ui_state.volume);
 
                     log::info!("开始播放 {}", file);
-                    
+
                     ui_state.enter_playing();
                     game_state.set(GameState::Playing).ok();
                     continue;

@@ -1,19 +1,15 @@
-
-
-
-
 pub struct Icons {
     // pub list: RetainedImage,
-// pub maximize: RetainedImage,
-// pub menu: RetainedImage,
-// pub minus: RetainedImage,
-// pub pause: RetainedImage,
-// pub play: RetainedImage,
-// pub settings: RetainedImage,
-// pub back: RetainedImage,
-// pub forward: RetainedImage,
-// pub stop: RetainedImage,
-// pub x: RetainedImage,
+    // pub maximize: RetainedImage,
+    // pub menu: RetainedImage,
+    // pub minus: RetainedImage,
+    // pub pause: RetainedImage,
+    // pub play: RetainedImage,
+    // pub settings: RetainedImage,
+    // pub back: RetainedImage,
+    // pub forward: RetainedImage,
+    // pub stop: RetainedImage,
+    // pub x: RetainedImage,
 }
 
 impl Icons {

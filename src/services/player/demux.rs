@@ -122,7 +122,7 @@ pub fn demux_init(
         let av_stream = ifmt_ctx.streams().get(stream_idx).ok_or_else(|| {
             PlayerError::Error(format!("根据 video stream_idx 无法获取到 video stream"))
         })?;
-        vdec_ctx.apply_codecpar(av_stream.codecpar())?;
+        vdec_ctx.apply_codecpar(&av_stream.codecpar())?;
         vdec_ctx.set_framerate(av_stream.guess_framerate().unwrap());
 
         vdec_ctx.open(None)?;
@@ -147,7 +147,7 @@ pub fn demux_init(
             let av_stream = ifmt_ctx.streams().get(stream_idx).ok_or_else(|| {
                 PlayerError::Error(format!("根据 audio stream_idx 无法获取到 audio stream"))
             })?;
-            adec_ctx.apply_codecpar(av_stream.codecpar())?;
+            adec_ctx.apply_codecpar(&av_stream.codecpar())?;
         }
         adec_ctx.open(None)?;
         Some((stream_idx, adec_ctx))
