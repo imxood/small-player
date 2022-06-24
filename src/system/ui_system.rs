@@ -28,7 +28,7 @@ pub fn update_ui(
 
     // 设置背景
     let frame = Frame {
-        margin: Margin::symmetric(0.0, 6.0),
+        inner_margin: Margin::symmetric(0.0, 6.0),
         fill: Color32::from_rgb(42, 56, 115),
         ..Default::default()
     };
@@ -45,7 +45,7 @@ pub fn update_ui(
 
     // 设置背景
     let frame = Frame {
-        margin: Margin::symmetric(0., 0.),
+        inner_margin: Margin::symmetric(0., 0.),
         ..Default::default()
     };
 

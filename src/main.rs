@@ -1,4 +1,3 @@
-#![feature(thread_is_running)]
 #![feature(linked_list_cursors)]
 #![feature(duration_consts_float)]
 

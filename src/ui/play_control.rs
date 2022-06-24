@@ -28,7 +28,7 @@ impl VideoControl {
                     if Label::new("⏮").sense(Sense::click()).ui(ui).clicked() {
                         player_evt.send(PlayerEvent::Previous);
                     }
-                    /* 
+                    /*
                         开始播放
                     */
                     {
