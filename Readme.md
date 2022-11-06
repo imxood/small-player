@@ -32,9 +32,10 @@ cd vcpkg
 
 # 使用 vcpkg 编译 (我开了代理, 总共编译大概36分钟):
 .\vcpkg.exe install ffmpeg[ffmpeg,ffplay,ffprobe,x265,avcodec,avdevice,fdk-aac] --triplet x64-windows-static-md --recurse
-```
 
-可能需要设置把 vcpkg.exe 和 cmake.exe 的路径设置到环境变量
+# 编译后, 设置环境变量
+FFMPEG_PKG_CONFIG_PATH=D:\programs\vcpkg\installed\x64-windows-static-md\lib\pkgconfig
+```
 
 #### ubuntu
 
@@ -52,12 +53,12 @@ make install
 
 # 编译 ffmpeg 的例子
 make examples -j
-```
 
-```
-# 记得设置环境变量, 编译ffi时需要
+# 编译后, 设置环境变量
 export FFMPEG_PKG_CONFIG_PATH=/develop/programs/ffmpeg_build/lib/pkgconfig
 ```
+
+
 
 ### 编译并运行
 
@@ -96,7 +97,7 @@ cargo run --release
 
     // 根据帧速率 算一下 两帧时间间隔, 即 当前帧播放时长
     duration = (frame_rate.num && frame_rate.den ? av_q2d((AVRational){frame_rate.den, frame_rate.num}) : 0);
-    
+
     // 计算显示时间, 即 当前帧显示时间戳
     pts = (p_frame->pts == AV_NOPTS_VALUE) ? NAN : p_frame->pts * av_q2d(tb);
 
@@ -111,7 +112,7 @@ cargo run --release
 学习自: [FFmpeg小点记】AV_DISPOSITION_ATTACHED_PIC](https://segmentfault.com/a/1190000018373504)
 
 ## ffmpeg 常用命令
-    
+
 ```sh
 # 显示音视频文件的Packages信息:
 ffprobe -show_packets -of json -i quliulang.mp3 > packets.json
